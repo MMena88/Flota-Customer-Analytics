@@ -1,0 +1,31 @@
+export type Client={id:string;code:string|null;name:string;segment:string;status:string;department:string;district:string;owner:string;products:string;supplier:string;contact:string;email:string;phone:string;website:string;notes:string;strategic:number;potential:number|null;potential_unit:string;next_action:string;next_date:string|null;created_at:string;updated_at:string};
+export type Daily={id:string;client_id:string;date:string;product:string;unit:string;location:string;volume:number;revenue:number|null;cost:number|null;source:string;updated_at:string};
+export type Activity={id:string;client_id:string|null;date:string;type:string;title:string;body:string;created_at:string};
+export type Doc={id:string;client_id:string;name:string;mime:string;size:number;summary:string;extracted_text:string;created_at:string};
+export type Market={id:string;segment:string;product:string;unit:string;start:string;end:string;total:number;addressable:number|null;source:string;scope:string;updated_at:string};
+export type ImportLog={id:string;kind:string;source:string;created:number;updated:number;unchanged:number;created_at:string};
+export type Chat={id:string;client_id:string|null;question:string;answer:string;context:string;created_at:string};
+export type Workspace={clients:Client[];records:Daily[];activities:Activity[];documents:Doc[];markets:Market[];imports:ImportLog[];chats:Chat[];aiReady:boolean;period:{start:string;end:string;previousStart:string;previousEnd:string};loadedAt:string};
+export const units=['gal','L','bbl','kg','t'];
+export function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guatemala',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+export function validDate(v:string){return /^\d{4}-\d{2}-\d{2}$/.test(v)&&!isNaN(Date.parse(v))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;}
+export function priorPeriod(start:string,end:string){const n=Math.round((Date.parse(end)-Date.parse(start))/86400000)+1;return {previousStart:new Date(Date.parse(start)-n*86400000).toISOString().slice(0,10),previousEnd:new Date(Date.parse(start)-86400000).toISOString().slice(0,10)};}
+export function norm(v:unknown){return String(v??'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');}
+export function str(v:unknown,max=300){const s=String(v??'').trim();if(s.length>max)throw new Error(`El texto supera ${max} caracteres.`);return s;}
+export function num(v:unknown,label:string,required=false){if(v==null||String(v).trim()===''){if(required)throw new Error(`Falta ${label}.`);return null;}const raw=String(v).trim();if(!/^\d+(\.\d+)?$/.test(raw))throw new Error(`${label}: usá un número positivo con punto decimal y sin separador de miles.`);const n=Number(raw);if(!Number.isFinite(n)||n>1e12)throw new Error(`${label}: valor fuera de rango.`);return n;}
+export function aggregate(rows:Daily[]){const count=rows.length;const complete=rows.filter(x=>x.revenue!==null&&x.cost!==null);return {count,volume:rows.reduce((s,x)=>s+x.volume,0),revenue:count&&rows.every(x=>x.revenue!==null)?rows.reduce((s,x)=>s+(x.revenue??0),0):null,contribution:count&&complete.length===count?complete.reduce((s,x)=>s+x.revenue!-x.cost!,0):null,knownContribution:complete.reduce((s,x)=>s+x.revenue!-x.cost!,0),costCoverage:count?complete.length/count:0};}
+export function change(now:number|null,before:number|null){return now===null||before===null||before===0?null:(now-before)/Math.abs(before);}
+export function safeCsv(v:unknown){let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}
+const aliases:Record<string,string>={nombre:'nombre',nombre_cliente:'nombre',cliente:'nombre',segmento:'segmento',codigo:'codigo',codigo_cliente:'codigo',id_cliente:'codigo',estado:'estado',tipo_cliente:'estado',departamento:'departamento',municipio:'distrito',municipio_distrito:'distrito',distrito:'distrito',ejecutivo:'ejecutivo',responsable:'ejecutivo',productos:'productos',proveedor:'proveedor',proveedor_actual:'proveedor',contacto:'contacto',correo:'correo',email:'correo',telefono:'telefono',web:'web',sitio_web:'web',notas:'notas',observaciones:'notas',fecha:'fecha',producto:'producto',unidad:'unidad',volumen:'volumen',ingreso:'ingreso',ingresos:'ingreso',venta_neta:'ingreso',costo:'costo',costos:'costo',costo_total:'costo',sucursal:'sucursal',instalacion:'sucursal',fuente:'fuente'};
+export function parseDelimited(text:string){
+ const raw=text.replace(/^\uFEFF/,'');if(raw.length>2_000_000)throw new Error('La carga supera 2 MB. Dividila en varios lotes.');
+ const line=raw.split(/\r?\n/,1)[0]||'';const sep=line.includes('\t')?'\t':line.includes(';')?';':',';
+ let row:string[]=[],cell='',quoted=false;const rows:string[][]=[];
+ for(let i=0;i<raw.length;i++){const c=raw[i];if(c==='"'){if(quoted&&raw[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}else if(c===sep&&!quoted){row.push(cell.trim());cell='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&raw[i+1]==='\n')i++;row.push(cell.trim());if(row.some(Boolean))rows.push(row);row=[];cell='';}else cell+=c;}
+ if(quoted)throw new Error('Hay comillas sin cerrar.');row.push(cell.trim());if(row.some(Boolean))rows.push(row);
+ if(rows.length<2)throw new Error('Incluí encabezados y al menos un cliente o registro.');if(rows.length>501)throw new Error('Podés importar hasta 500 filas por lote.');
+ const headers=rows.shift()!.map(h=>aliases[norm(h).replace(/ /g,'_')]||norm(h));if(new Set(headers).size!==headers.length)throw new Error('Hay columnas repetidas.');
+ return rows.map((r,i)=>{if(r.length!==headers.length)throw new Error(`Fila ${i+2}: tiene ${r.length} columnas; se esperaban ${headers.length}.`);return Object.fromEntries(headers.map((h,j)=>[h,r[j]]));});
+}
+export function recordKey(r:Pick<Daily,'client_id'|'date'|'product'|'unit'|'location'>){return JSON.stringify([r.client_id,r.date,norm(r.product),r.unit,norm(r.location)]);}
+export function pricing(volume:number,price:number,cost:number,proposed:number,volumeChange:number){const unit=price-cost,nextUnit=proposed-cost;return {base:volume*unit,proposed:volume*(1+volumeChange)*nextUnit,breakEven:nextUnit>0?volume*unit/nextUnit:null,maxLoss:nextUnit>0&&unit>0?1-unit/nextUnit:null};}

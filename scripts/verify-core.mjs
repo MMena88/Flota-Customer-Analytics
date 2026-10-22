@@ -1,0 +1,52 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+const root=process.cwd(),tmp=path.join(root,'.sites-runtime/verification');await fs.mkdir(tmp,{recursive:true});
+const files=['lib/domain.ts','lib/server.ts','lib/fleet-domain.ts','lib/fleet-server.ts','lib/payment-xlsx.ts',...['clients','workspace','import','activities','documents','markets','assistant','fleet','fleet/import','fleet/transactions'].map(x=>`app/api/${x}/route.ts`)];
+for(const file of files){let code=ts.transpileModule(await fs.readFile(path.join(root,file),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;code=code.replace(/from ['"]cloudflare:workers['"]/g,`from '${pathToFileURL(path.join(tmp,'runtime.mjs'))}'`).replace(/from ['"]@\/lib\/(.*?)['"]/g,(_,name)=>`from '${pathToFileURL(path.join(tmp,'lib',name+'.mjs'))}'`).replace(/from ['"]\.\/([^'"]+)['"]/g,(_,name)=>`from './${name}.mjs'`);const out=path.join(tmp,file.replace(/\.ts$/,'.mjs'));await fs.mkdir(path.dirname(out),{recursive:true});await fs.writeFile(out,code);}
+await fs.writeFile(path.join(tmp,'runtime.mjs'),`import {DatabaseSync} from 'node:sqlite';
+export const sqlite=new DatabaseSync(':memory:');sqlite.exec('PRAGMA foreign_keys=ON');
+const wrap=(sql,args=[])=>({bind(...values){return wrap(sql,values)},async all(){return {results:sqlite.prepare(sql).all(...args)}},async first(){return sqlite.prepare(sql).get(...args)||null},async run(){return sqlite.prepare(sql).run(...args)},_run(){return sqlite.prepare(sql).run(...args)}});
+const objects=new Map();export const env={DB:{prepare:wrap,async batch(items){sqlite.exec('BEGIN');try{const result=items.map(s=>s._run());sqlite.exec('COMMIT');return result}catch(e){sqlite.exec('ROLLBACK');throw e}}},BUCKET:{async put(key,bytes){objects.set(key,new Uint8Array(bytes))},async get(key){const b=objects.get(key);return b?{body:b,arrayBuffer:async()=>b.buffer}:null},async delete(key){objects.delete(key)}}};`);
+const {sqlite}=await import(pathToFileURL(path.join(tmp,'runtime.mjs')).href);
+const migrations=(await fs.readdir(path.join(root,'drizzle'))).filter(s=>s.endsWith('.sql')).sort();for(const file of migrations)sqlite.exec(await fs.readFile(path.join(root,'drizzle',file),'utf8'));
+const domain=await import(pathToFileURL(path.join(tmp,'lib/domain.mjs')).href),routes={};for(const name of ['clients','workspace','import','activities','documents','markets','assistant','fleet','fleet/import','fleet/transactions'])routes[name]=await import(pathToFileURL(path.join(tmp,`app/api/${name}/route.mjs`)).href);
+let tests=0;function ok(condition,message){assert.ok(condition,message);tests++;console.log('PASS '+message)}
+async function call(name,payload,query=''){const req=new Request('https://puma.test/api/'+name+query,payload?{method:'POST',headers:{'content-type':'application/json','origin':'https://puma.test'},body:JSON.stringify(payload)}:{});const response=await routes[name][payload?'POST':'GET'](req);return {status:response.status,data:await response.json()};}
+ok(domain.validDate('2024-02-29')&&!domain.validDate('2026-02-29'),'Calendar dates validated');
+assert.deepEqual(domain.priorPeriod('2026-10-01','2026-10-19'),{previousStart:'2026-09-12',previousEnd:'2026-09-30'});tests++;
+assert.deepEqual(domain.parseDelimited('nombre;segmento\n"Prueba, SA";Industrial'),[{nombre:'Prueba, SA',segmento:'Industrial'}]);tests++;
+assert.throws(()=>domain.parseDelimited('nombre,segmento\nA,B,C'));assert.throws(()=>domain.num('1,000','Volumen'));tests+=2;
+ok(domain.num('0','Costo')===0&&domain.num('','Costo')===null,'Blank cost differs from zero');
+ok((await call('clients',{name:'Incompleto'})).status===400,'Client requires name and segment');
+const created=await call('clients',{name:'Cliente de prueba',segment:'Industria',code:'001'});ok(created.status===200&&created.data.client.code==='001','Create client preserves identifier');let client=created.data.client;
+ok((await call('clients',{name:'Otro',segment:'Industria',code:'001'})).status===400,'Duplicate client code rejected');
+ok((await call('clients',{...client,name:'Renombrado',updated_at:'stale'})).status===409,'Stale edits rejected');
+const edited=await call('clients',{...client,strategic:true,notes:'Acuerdo comercial'});ok(edited.status===200&&edited.data.client.strategic===1,'Client enrichment saved');client=edited.data.client;
+const clientRows=domain.parseDelimited('nombre\tsegmento\tcodigo\nCuenta B\tTransporte\t002');let cp=await call('import',{kind:'clients',rows:clientRows});ok(cp.data.created===1&&!cp.data.errors.length,'Preview of client import');
+ok((await call('import',{kind:'clients',rows:clientRows,commit:true,token:cp.data.token})).data.saved,'Client import commits');
+cp=await call('import',{kind:'clients',rows:clientRows});ok(cp.data.unchanged===1,'Identical client reimport is unchanged');
+const rows=[{fecha:'2026-10-19',codigo:'001',producto:'Diésel',unidad:'gal',volumen:'1000',ingreso:'3500',costo:'3200'}];let p=await call('import',{kind:'records',rows});ok(p.data.created===1&&p.data.errors.length===0,'Daily preview resolves client code');
+const first=await call('import',{kind:'records',rows,token:p.data.token,commit:true});ok(first.status===200&&first.data.created===1,'Daily import commits');
+let work=await call('workspace',undefined,'?start=2026-10-01&end=2026-10-19');ok(work.data.records.length===1&&domain.aggregate(work.data.records).contribution===300,'Workspace reflects contribution');
+const repeated=await call('import',{kind:'records',rows});ok(repeated.data.unchanged===1,'Identical daily reimport does not duplicate');
+await call('import',{kind:'records',rows,token:repeated.data.token,commit:true});ok(sqlite.prepare('SELECT count(*) AS n FROM records').get().n===1,'Only one record after reimport');
+const corrected=[{...rows[0],volumen:'1100',ingreso:'3850',costo:'3520'}];p=await call('import',{kind:'records',rows:corrected});ok(p.data.updated===1,'Correction is identified');await call('import',{kind:'records',rows:corrected,token:p.data.token,commit:true});
+ok(sqlite.prepare('SELECT count(*) AS n FROM records').get().n===1&&sqlite.prepare('SELECT volume FROM records').get().volume===1100,'Correction replaces rather than accumulates volume');
+ok(sqlite.prepare("SELECT count(*) AS n FROM revisions WHERE entity='records'").get().n===2,'Old and new values retained in revisions');
+ok((await call('import',{kind:'records',rows:[...rows,...rows]})).data.errors.length===1,'Duplicate rows in batch rejected');
+ok((await call('import',{kind:'records',rows:[{...rows[0],codigo:'missing'}]})).data.errors.length===1,'Unknown client is not silently created');
+ok((await call('import',{kind:'records',rows:corrected,token:'stale',commit:true})).status===409,'Stale import confirmation rejected');
+const incomplete=[{...rows[0],fecha:'2026-10-18',costo:''}];p=await call('import',{kind:'records',rows:incomplete});await call('import',{kind:'records',rows:incomplete,token:p.data.token,commit:true});work=await call('workspace',undefined,'?start=2026-10-01&end=2026-10-19');ok(domain.aggregate(work.data.records).contribution===null,'Missing cost prevents false total contribution');
+const badOrigin=new Request('https://puma.test/api/clients',{method:'POST',headers:{origin:'https://other.test'},body:JSON.stringify({name:'CSRF',segment:'Test'})});ok((await routes.clients.POST(badOrigin)).status===400,'Cross-origin writes rejected');
+ok((await call('activities',{client_id:client.id,date:'2026-10-19',type:'Visita',title:'Reunión',body:'Pendiente propuesta'})).status===200,'Activity saved');
+ok((await call('markets',{segment:'Industria',product:'Diésel',unit:'gal',start:'2026-10-01',end:'2026-10-19',total:'100',addressable:'101',source:'Prueba',scope:'Prueba'})).status===400,'Addressable market cannot exceed total');
+const file=new File(['Notas de prueba'], 'notas.txt',{type:'text/plain'}),form=new FormData();form.set('client_id',client.id);form.set('file',file);form.set('summary','Documento de prueba');ok((await routes.documents.POST(new Request('https://puma.test/api/documents',{method:'POST',body:form}))).status===200,'Document and metadata saved');
+const doc=sqlite.prepare('SELECT id FROM documents').get();const downloaded=await routes.documents.GET(new Request('https://puma.test/api/documents?id='+doc.id));ok(await downloaded.text()==='Notas de prueba','Uploaded document downloadable');
+ok((await call('assistant',{question:'Resumí',start:'2026-10-01',end:'2026-10-19'})).status===503,'No simulated AI response without credentials');
+const scenario=domain.pricing(100000,3.5,3.2,3.6,-.05);ok(Math.abs(scenario.base-30000)<1e-6&&Math.abs(scenario.proposed-38000)<1e-6&&Math.abs(scenario.maxLoss-.25)<1e-8,'Pricing and volume break-even are consistent');
+console.log(JSON.stringify({passed:tests,database:'in-memory SQLite',externalAiCalls:0}));
+
+export {sqlite,call,ok,routes,tmp};
