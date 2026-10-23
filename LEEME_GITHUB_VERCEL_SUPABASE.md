@@ -1,24 +1,17 @@
-# Puma Comercial SV — código fuente completo
+# Puesta en marcha — Vercel y Supabase
 
-Copia del código publicado, commit 183cc8e31c801fba0a1dab9009b6e831ec0b0214.
-Incluye interfaz, API, clientes, tier list Flota, importación Payment24, pruebas, esquema y migraciones.
+El repositorio ya usa Next.js y PostgreSQL/Supabase. Las instrucciones completas y las variables están en [README.md](README.md).
 
-## GitHub
-Descomprimir el ZIP y subir el contenido de esta carpeta a un repositorio. Se incluye .gitignore.
-No contiene contraseñas, claves, node_modules, historial Git ni los datos privados de clientes.
-Los 90.574 registros y archivos subidos están en la base y almacenamiento del sitio actual; no forman parte del código. La importación Payment24 permite cargarlos en el destino una vez migrado.
+Orden de puesta en marcha:
 
-## Estado de Vercel y Supabase
-Esta copia conserva la implementación publicada en Sites/Vinext/Cloudflare. NO es todavía una versión migrada a Vercel/Supabase. Cambiar únicamente variables de entorno no completa la migración.
+1. Preparar el proyecto Supabase y aplicar las dos migraciones.
+2. Crear el usuario en Supabase Authentication y habilitarlo en `app_private.app_members`.
+3. Importar el repositorio en Vercel con Next.js, raíz `./`, Node.js 24 y `npm run build`.
+4. Configurar las cuatro variables requeridas del README en Production y desplegar.
+5. Iniciar sesión, importar el reporte Payment24 y conciliar los totales con su vista previa.
+6. Verificar una ficha, el ranking, una transacción y la descarga del original. Volver a seleccionar el mismo archivo debe indicar que ya fue importado.
+7. Agregar el resto del equipo con los permisos apropiados.
 
-Adaptaciones pendientes:
-1. Cambiar ejecución y compilación Vinext/Worker a Next.js compatible con el destino.
-2. Migrar SQLite/D1 a PostgreSQL Supabase: tablas, índices, vistas, consultas, transacciones e importaciones por bloques.
-3. Sustituir R2 por Supabase Storage privado y mantener las descargas autorizadas.
-4. Sustituir el inicio de sesión de ChatGPT/Sites por Supabase Auth y autorización del equipo en todas las rutas. Definir políticas RLS y de Storage antes de cargar datos reales.
-5. Configurar variables en el destino mediante sus campos seguros. Nunca agregar claves secretas al repositorio.
-6. Migrar los datos o volver a importar Payment24; conciliar 142 clientes, 146 cuentas, 90.574 registros y 927,263.408 galones netos.
-7. Verificar filtros, fichas, correcciones, reimportación sin duplicados, descargas y acceso privado.
+El código y los datos son independientes. Este repositorio no contiene la base privada ni los archivos del sitio anterior. La carga Payment24 recupera transacciones y clientes de esa fuente; notas, contactos, actividades u otros documentos añadidos al sitio anterior requieren migración separada antes de retirarlo.
 
-El asistente IA está implementado pero la conexión permanece pendiente. Ver PLATFORM.md para reglas de negocio, límites y pruebas.
-La identidad en .openai/hosting.json corresponde al sitio existente; no otorga acceso a sus datos ni debe usarse para desplegar accidentalmente sobre ese sitio desde otro entorno.
+La primera publicación sin credenciales muestra una pantalla de configuración pendiente. No representa una conexión funcional con Supabase. Las consultas de IA permanecen deshabilitadas hasta configurar y verificar el proveedor.

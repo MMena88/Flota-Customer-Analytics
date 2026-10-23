@@ -49,5 +49,5 @@ export default function Platform({displayName}:{displayName:string}){
  {view==='market'&&data&&<MarketView data={data} current={current} start={start} end={end} unit={unit} segment={segment} period={period} actions={actions}/>}
  {view==='pricing'&&data&&<PricingView data={data} unit={unit} setUnit={setUnit} actions={actions}/>}
  {view==='ai'&&data&&<AssistantView data={data} start={start} end={end} unit={unit} segment={segment} period={period} clientId={aiClient} setClientId={id=>{setAiClient(id);setAiDoc('')}} documentId={aiDoc} setDocumentId={setAiDoc} actions={actions}/>}
- </>}</>}<footer>EL SALVADOR <span>Información comercial de tu cartera · USD</span></footer></div></main>{toast&&<div className="toast" role="status"><Check size={18}/>{toast}</div>}{edit&&<ClientEditor client={edit} segments={segments} actions={actions} onClose={()=>setEdit(null)} onSaved={open}/>}</div>;
+ </>}</>}<footer><form action="/auth/logout" method="post"><button className="logout-button">Cerrar sesión</button></form>EL SALVADOR <span>Información comercial de tu cartera · USD</span></footer></div></main>{toast&&<div className="toast" role="status"><Check size={18}/>{toast}</div>}{edit&&<ClientEditor client={edit} segments={segments} actions={actions} onClose={()=>setEdit(null)} onSaved={open}/>}</div>;
 }

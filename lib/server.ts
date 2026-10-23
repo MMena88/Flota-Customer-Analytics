@@ -1,12 +1,12 @@
-import {env} from 'cloudflare:workers';
+import {database} from './database';
 import {str,num,norm,validDate,units,recordKey,type Client,type Daily} from './domain';
-export const db=()=>{if(!env.DB)throw new Error('La base de datos todavía no está disponible.');return env.DB;};
+export const db=()=>database;
 export const now=()=>new Date().toISOString();
-export function json(data:unknown,status=200){return Response.json(data,{status,headers:{'Cache-Control':'no-store'}});}
-export function checkOrigin(req:Request){const o=req.headers.get('Origin');if(o&&o!==new URL(req.url).origin)throw new Error('Origen no permitido.');}
+export function json(data:unknown,status=200){const text=JSON.stringify(data);if(Buffer.byteLength(text,'utf8')>4_000_000)return Response.json({error:'La consulta contiene demasiada información. Seleccioná un período más corto o un cliente.'},{status:413,headers:{'Cache-Control':'no-store'}});return new Response(text,{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});}
+export function checkOrigin(req:Request){const o=req.headers.get('Origin');if((o&&o!==new URL(req.url).origin)||req.headers.get('sec-fetch-site')==='cross-site')throw new Error('Origen no permitido.');}
 export async function body(req:Request){checkOrigin(req);const t=await req.text();if(t.length>2_000_000)throw new Error('La carga supera 2 MB.');return JSON.parse(t);}
 export async function all<T>(sql:string,...args:(string|number|null)[]){return (await db().prepare(sql).bind(...args).all<T>()).results;}
-export function insert(table:string,row:Record<string,unknown>,replace=false){const cols=Object.keys(row);return db().prepare(`INSERT ${replace?'OR REPLACE ':''}INTO ${table} (${cols.map(c=>'"'+c+'"').join(',')}) VALUES (${cols.map(()=>'?').join(',')})`).bind(...cols.map(c=>row[c]??null));}
+export function insert(table:string,row:Record<string,unknown>){const cols=Object.keys(row);return db().prepare(`INSERT INTO ${table} (${cols.map(c=>'"'+c+'"').join(',')}) VALUES (${cols.map(()=>'?').join(',')})`).bind(...cols.map(c=>row[c]??null));}
 export function update(table:string,row:Record<string,unknown>){const cols=Object.keys(row).filter(k=>k!=='id');return db().prepare(`UPDATE ${table} SET ${cols.map(k=>'"'+k+'"=?').join(',')} WHERE id=?`).bind(...cols.map(c=>row[c]??null),row.id);}
 export function revision(entity:string,before:unknown,after:{id:string},batchId:string|null=null){return insert('revisions',{id:crypto.randomUUID(),entity,entity_id:after.id,before_json:before?JSON.stringify(before):null,after_json:JSON.stringify(after),batch_id:batchId,created_at:now()});}
 export function cleanClient(input:Record<string,unknown>,old?:Client):Client{

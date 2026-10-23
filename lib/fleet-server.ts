@@ -1,4 +1,5 @@
 import {all,db,insert,cleanClient,fingerprint,now} from './server';
+import type {Statement} from './database';
 import {norm,priorPeriod,validDate,type Client,type Daily} from './domain';
 import {validateFleetRow,rankFleet,daysBetween,type FleetRow} from './fleet-domain';
 
@@ -13,10 +14,10 @@ export async function fleetJob(id:string){const j=await db().prepare('SELECT * F
 export async function importFleetBatch(job:FleetImport,offset:number,input:unknown[]){
  if(!Array.isArray(input)||input.length===0||input.length>250)throw new Error('Cada bloque debe contener entre 1 y 250 registros.');
  const rows=input.map(validateFleetRow);if(new Set(rows.map(r=>r.transaction_id)).size!==rows.length)throw new Error('Hay IDs repetidos dentro del bloque.');
- const hash=await fingerprint(rows),oldBatch=await db().prepare('SELECT * FROM fleet_batches WHERE import_id=? AND offset=?').bind(job.id,offset).first<any>();if(oldBatch){if(oldBatch.content_hash!==hash)throw new Error('El bloque ya recibido contiene otros datos.');return {...oldBatch,processed:job.processed,replayed:true};}
+ const hash=await fingerprint(rows),oldBatch=await db().prepare('SELECT * FROM fleet_batches WHERE import_id=? AND "offset"=?').bind(job.id,offset).first<any>();if(oldBatch){if(oldBatch.content_hash!==hash)throw new Error('El bloque ya recibido contiene otros datos.');return {...oldBatch,processed:job.processed,replayed:true};}
  if(job.status!=='loading'||offset!==job.processed||offset+rows.length>job.total_rows)throw new Error('La carga cambió o el bloque está fuera de orden. Volvé a seleccionar el archivo para reanudar.');
  const [accounts,clients]=await Promise.all([all<{account:string;client_id:string}>('SELECT account,client_id FROM fleet_accounts'),all<Client>('SELECT * FROM clients')]);
- const accountMap=new Map(accounts.map(a=>[a.account,a.client_id])),clientList=[...clients],statements:D1PreparedStatement[]=[];
+ const accountMap=new Map(accounts.map(a=>[a.account,a.client_id])),clientList=[...clients],statements:Statement[]=[];
  for(const r of rows){if(accountMap.has(r.account))continue;const codeMatches=clientList.filter(c=>norm(c.code)===norm(r.account));let matches=codeMatches.length?codeMatches:clientList.filter(c=>norm(c.name)===norm(r.customer_name));if(matches.length>1)throw new Error('Más de una ficha coincide con '+r.customer_name+'. Revisá los códigos de cliente.');let client=matches[0];if(!client){client=cleanClient({name:r.customer_name,code:r.account,segment:'Flota',status:'Actual'});statements.push(insert('clients',client));clientList.push(client);}accountMap.set(r.account,client.id);statements.push(insert('fleet_accounts',{account:r.account,client_id:client.id,source_name:r.customer_name,created_at:now()}));}
  const existing=new Map<string,{content_hash:string}>();
  for(let i=0;i<rows.length;i+=80){const ids=rows.slice(i,i+80).map(r=>r.transaction_id),values=await all<{transaction_id:string;content_hash:string}>(`SELECT transaction_id,content_hash FROM fleet_current WHERE transaction_id IN (${ids.map(()=>'?').join(',')})`,...ids);for(const v of values)existing.set(v.transaction_id,v);const repeated=await all<{transaction_id:string}>(`SELECT transaction_id FROM fleet_transactions WHERE import_id=? AND transaction_id IN (${ids.map(()=>'?').join(',')})`,job.id,...ids);if(repeated.length)throw new Error('El archivo repite un ID entre bloques. Revisá la exportación.');}
