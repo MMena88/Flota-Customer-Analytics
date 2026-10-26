@@ -90,3 +90,5 @@ npm test -- "/ruta/al/reporte-Payment24.xlsx"
 Las pruebas ejecutan SQL real de PostgreSQL mediante PGlite, la autorización, los handlers y las reglas de importación. Solo los servicios externos de Supabase Auth/Storage se sustituyen por adaptadores de prueba. La prueba con XLSX concilia filas, clientes, cuentas, consumo e importes entre el lector y los endpoints. Las sesiones reales, Storage remoto, correo y la IA requieren verificación posterior en el proyecto configurado.
 
 [Reglas de negocio y límites](PLATFORM.md) · [Guía de puesta en marcha](LEEME_GITHUB_VERCEL_SUPABASE.md)
+
+La integración oficial Supabase–Vercel puede proporcionar `POSTGRES_URL`; la aplicación la acepta como alternativa a `DATABASE_URL`, que conserva prioridad. Las migraciones también aceptan esta alternativa.

@@ -11,7 +11,7 @@ let driver:Driver|undefined;
 const context=new AsyncLocalStorage<Connection>();
 function getDriver(){
  if(driver)return driver;
- const value=process.env.DATABASE_URL;if(!value)throw new Error('Falta configurar la base de datos.');
+ const value=process.env.DATABASE_URL||process.env.POSTGRES_URL;if(!value)throw new Error('Falta configurar la base de datos.');
  const url=new URL(value);const local=['localhost','127.0.0.1','::1'].includes(url.hostname);
  for(const key of ['sslmode','sslcert','sslkey','sslrootcert'])url.searchParams.delete(key);
  driver=new Pool({connectionString:url.toString(),max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:15000,allowExitOnIdle:true,ssl:local?false:{rejectUnauthorized:true,...(process.env.DATABASE_CA_CERT?{ca:process.env.DATABASE_CA_CERT}:{})},application_name:'puma-comercial'});

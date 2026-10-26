@@ -3,7 +3,7 @@ import {Client} from 'pg';
 
 export async function adminConnection() {
   if (existsSync('.env.local')) process.loadEnvFile('.env.local');
-  const value = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
+  const value = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!value) throw new Error('Configurá MIGRATION_DATABASE_URL o DATABASE_URL en .env.local.');
   const url = new URL(value);
   const local = ['localhost','127.0.0.1','::1'].includes(url.hostname);
