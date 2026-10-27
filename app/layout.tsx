@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./redesign.css";
 
 export const metadata: Metadata = {
-  title: "Puma Comercial | El Salvador",
+  title: "Puma Flota | Inteligencia comercial",
   description: "Clientes, oportunidades y decisiones comerciales con información actualizada.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/brand/puma-flota.png",
+    shortcut: "/brand/puma-flota.png",
   },
 };
 

@@ -23,8 +23,8 @@ export default function LoginForm({denied}: {denied: boolean}) {
       setBusy(false);
     }
   }}>
-    <label className="field"><span>Correo del equipo</span><input name="email" type="email" autoComplete="username" required/></label>
-    <label className="field"><span>Contraseña</span><input name="password" type="password" autoComplete="current-password" required/></label>
+    <label className="field"><span>Correo del equipo</span><input name="email" type="email" autoComplete="username" placeholder="nombre@empresa.com" required/></label>
+    <label className="field"><span>Contraseña</span><input name="password" type="password" autoComplete="current-password" placeholder="Tu contraseña" required/></label>
     {error && <p className="auth-error" role="alert">{error}</p>}
     <button className="button" disabled={busy}>{busy ? 'Ingresando…' : 'Ingresar'}</button>
     <p className="help-text">Las cuentas las habilita el administrador. Si necesitás acceso o recuperar tu contraseña, contactalo.</p>
