@@ -18,13 +18,16 @@ export function parseCommercial(bytes:Uint8Array){
 // Replace only dates actually present for each channel, including removed/corrected products.
 export function mergeCommercial(old:CommercialRow[],incoming:CommercialRow[]){const scopes=new Set(incoming.map(r=>JSON.stringify([r.date,r.segment])));return [...old.filter(r=>!scopes.has(JSON.stringify([r.date,r.segment]))),...incoming];}
 export function matchCustomers(rows:CommercialRow[],names:string[]){const codes=new Map<string,Set<string>>();for(const r of rows){const k=customerKey(r.name);if(!k||k==='NONE')continue;const set=codes.get(k)||new Set<string>();set.add(r.code||k);codes.set(k,set)}const payment=new Set(names.map(customerKey));return {payment,codes};}
-export type CommercialPoint={key:string;name:string;code:string;segment:string;sourceSegments:string[];volume:number;sales:number;cost:number;margin:number;unitMargin:number|null;payment:boolean};
+export type CommercialPoint={key:string;customerId:string;name:string;code:string;segment:string;product:string;identified:boolean;sourceSegments:string[];volume:number;sales:number;cost:number;margin:number;unitMargin:number|null;payment:boolean};
 export function summarizeCommercial(rows:CommercialRow[],names:string[],metric:'grossMargin'|'productMargin',filter:{start?:string;end?:string;segment?:string;product?:string;search?:string;confirmedNames?:string[]}={}){
  const matches=matchCustomers(rows,names),map=new Map<string,CommercialPoint>();let adjustments=0,unidentified=0;
  for(const r of rows){if(filter.start&&r.date<filter.start||filter.end&&r.date>filter.end||filter.product&&r.product!==filter.product)continue;
- const k=customerKey(r.name),payment=matches.payment.has(k)&&(matches.codes.get(k)?.size===1||!!filter.confirmedNames?.includes(k));const segment=payment?'B2B · Payment24':r.segment;
+ const k=customerKey(r.name),identified=!!k&&k!=='NONE',payment=identified&&matches.payment.has(k)&&(matches.codes.get(k)?.size===1||!!filter.confirmedNames?.includes(k));const segment=payment?'B2B · Payment24':r.segment;
  if(filter.segment&&segment!==filter.segment||filter.search&&!customerKey(r.name+' '+r.code).includes(customerKey(filter.search)))continue;
- if(!r.name||k==='NONE'){unidentified++;continue}if(r.volume===0&&r[metric]!==0)adjustments++;
- const key=JSON.stringify([payment?k:r.code||k,segment]);let p=map.get(key);if(!p){p={key,name:r.name,code:r.code,segment,sourceSegments:[],volume:0,sales:0,cost:0,margin:0,unitMargin:null,payment};map.set(key,p)}if(payment&&r.code&&!p.code.split(', ').includes(r.code))p.code+=', '+r.code;if(!p.sourceSegments.includes(r.segment))p.sourceSegments.push(r.segment);p.volume+=r.volume;p.sales+=r.sales;p.cost+=r.cost;p.margin+=r[metric];
+ if(!identified)unidentified++;if(r.volume===0&&r[metric]!==0)adjustments++;
+ // Keep products separate: Commercial does not supply a common volume unit.
+ // Include unnamed accounting rows in totals and tables, never as invented customers.
+ const customerId=identified?(payment?'payment:'+k:r.code?'code:'+r.code:'name:'+k):'unassigned';
+ const key=JSON.stringify([customerId,segment,r.product]);let p=map.get(key);if(!p){p={key,customerId,name:identified?r.name:'Sin cliente informado',code:r.code==='NONE'?'':r.code,segment,product:r.product,identified,sourceSegments:[],volume:0,sales:0,cost:0,margin:0,unitMargin:null,payment};map.set(key,p)}if(payment&&r.code&&!p.code.split(', ').includes(r.code))p.code+=', '+r.code;if(!p.sourceSegments.includes(r.segment))p.sourceSegments.push(r.segment);p.volume+=r.volume;p.sales+=r.sales;p.cost+=r.cost;p.margin+=r[metric];
  }const points=[...map.values()].map(p=>({...p,unitMargin:p.volume>0?p.margin/p.volume:null})).sort((a,b)=>b.volume-a.volume);return {points,adjustments,unidentified,ambiguous:[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!filter.confirmedNames?.includes(k)).length};
 }
