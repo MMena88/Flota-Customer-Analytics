@@ -1,6 +1,15 @@
 export type CommercialRow={date:string;segment:string;code:string;name:string;product:string;volume:number;sales:number;cost:number;productMargin:number;variableCost:number;grossMargin:number};
 export type CommercialData={rows:CommercialRow[];updatedAt:string;source:string;paymentNames:string[];confirmedNames?:string[];history:{at:string;source:string;rows:number;from:string;to:string}[]};
 export const customerKey=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+export const commercialFamily=(segment:string)=>{
+ const code=segment.split(' - ')[0];
+ if(['111','112','113'].includes(code))return 'Combustibles';
+ if(code.startsWith('12'))return 'Lubricantes';
+ if(code.startsWith('13'))return 'GLP';
+ if(code.startsWith('14'))return 'Aviación';
+ if(code.startsWith('17'))return 'Suministro';
+ return '';
+};
 function csv(text:string,delimiter:string){const result:string[][]=[];let row:string[]=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted;}else if(!quoted&&(c===delimiter||c==='\n')){row.push(cell.replace(/\r$/,''));cell='';if(c==='\n'){result.push(row);row=[]}}else cell+=c;}if(quoted)throw new Error('Comillas sin cerrar en el archivo.');if(cell||row.length){row.push(cell.replace(/\r$/,''));result.push(row)}return result;}
 function numeric(s:string,label:string){const t=s.trim().replace(/,/g,'').replace(/^\((.*)\)$/,'-$1');if(!t)return 0;if(!/^-?\d+(\.\d+)?$/.test(t))throw new Error('Número inválido en '+label);const v=Number(t);if(!Number.isFinite(v)||Math.abs(v)>1e13)throw new Error('Valor fuera de rango en '+label);return v;}
 export function parseCommercial(bytes:Uint8Array){
@@ -23,7 +32,10 @@ export function summarizeCommercial(rows:CommercialRow[],names:string[],metric:'
  const matches=matchCustomers(rows,names),map=new Map<string,CommercialPoint>();let adjustments=0,unidentified=0;
  for(const r of rows){if(filter.start&&r.date<filter.start||filter.end&&r.date>filter.end||filter.product&&r.product!==filter.product)continue;
  const k=customerKey(r.name),identified=!!k&&k!=='NONE',payment=identified&&matches.payment.has(k)&&(matches.codes.get(k)?.size===1||!!filter.confirmedNames?.includes(k));const segment=payment?'B2B · Payment24':r.segment;
- if(filter.segment&&segment!==filter.segment||filter.search&&!customerKey(r.name+' '+r.code).includes(customerKey(filter.search)))continue;
+ // Filter original rows before aggregation so a family never includes sales
+ // from another source channel through a shared Payment24 customer/product.
+ const inSegment=!filter.segment||(filter.segment.startsWith('@family:')?commercialFamily(r.segment)===filter.segment.slice(8):segment===filter.segment);
+ if(!inSegment||filter.search&&!customerKey(r.name+' '+r.code).includes(customerKey(filter.search)))continue;
  if(!identified)unidentified++;if(r.volume===0&&r[metric]!==0)adjustments++;
  // Keep products separate: Commercial does not supply a common volume unit.
  // Include unnamed accounting rows in totals and tables, never as invented customers.
