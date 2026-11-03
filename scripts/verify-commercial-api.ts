@@ -5,12 +5,11 @@ import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {createApiGuard,AccessError} from '../lib/api-guard';
 import * as commercial from '../lib/commercial';
-import * as growth from '../lib/commercial-growth';
 const dir=path.resolve('.tmp/commercial-api');await fs.mkdir(dir,{recursive:true});
 const objects=new Map<string,Blob>();const member={id:'00000000-0000-4000-8000-000000000001',email:'test@example.invalid',displayName:'Test',role:'editor' as const};
 const guard=createApiGuard(async req=>{const role=req.headers.get('x-test-role');if(!role)throw new AccessError('Sign in',401);return {...member,role:role as 'editor'|'viewer'}},async fn=>fn());
-(globalThis as any).__commercialTest={commercial,growth,withApi:guard,all:async()=>[{source_name:'Ejemplo SA'}],body:async(req:Request)=>req.json(),json:(x:unknown,status=200)=>Response.json(x,{status}),storageBucket:'test',storageAdmin:()=>({download:async(k:string)=>objects.has(k)?{data:objects.get(k),error:null}:{data:null,error:{statusCode:'404',message:'Object not found'}},upload:async(k:string,s:string)=>{objects.set(k,new Blob([s]));return {error:null}},createSignedUploadUrl:async(k:string)=>({data:{path:k,token:'test'},error:null})})};
-let source=await fs.readFile('app/api/commercial/route.ts','utf8');source=source.replace(/^import .* from .*;$/gm,'');source='const {withApi,all,body,json,storageAdmin,storageBucket,commercial,growth}=globalThis.__commercialTest;const {summarizeGrowth}=growth;const {parseCommercial,mergeCommercial,summarizeCommercial,matchCustomers,customerKey}=commercial;\n'+source;
+(globalThis as any).__commercialTest={commercial,withApi:guard,all:async()=>[{source_name:'Ejemplo SA'}],body:async(req:Request)=>req.json(),json:(x:unknown,status=200)=>Response.json(x,{status}),storageBucket:'test',storageAdmin:()=>({download:async(k:string)=>objects.has(k)?{data:objects.get(k),error:null}:{data:null,error:{statusCode:'404',message:'Object not found'}},upload:async(k:string,s:string)=>{objects.set(k,new Blob([s]));return {error:null}},createSignedUploadUrl:async(k:string)=>({data:{path:k,token:'test'},error:null})})};
+let source=await fs.readFile('app/api/commercial/route.ts','utf8');source=source.replace(/^import .* from .*;$/gm,'');source='const {withApi,all,body,json,storageAdmin,storageBucket,commercial}=globalThis.__commercialTest;const {parseCommercial,mergeCommercial,summarizeCommercial,matchCustomers,customerKey}=commercial;\n'+source;
 await fs.writeFile(path.join(dir,'route.mjs'),ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);
 const route=await import(pathToFileURL(path.join(dir,'route.mjs')).href);
 const req=(method:string,value?:unknown,role='editor',origin='https://test.invalid')=>new Request('https://test.invalid/api/commercial',{method,headers:{'x-test-role':role,origin,'content-type':'application/json'},...(value?{body:JSON.stringify(value)}:{})});
@@ -25,12 +24,3 @@ for(let i=0;i<2;i++)assert.equal((await route.POST(req('POST',{action:'finish',p
 const result=await (await route.GET(req('GET'))).json();assert.equal(result.totalRows,1);assert.equal(result.points[0].unitMargin,.25);assert.equal(result.points[0].segment,'B2B · Payment24');
 assert.equal((await route.POST(req('POST',{action:'finish',path:'commercial/uploads/someone-else/file.csv'}))).status,400);
 console.log('PASS API: authentication, viewer protection, origin check, empty state, upload, repeat import, stored reload, B2B matching, upload ownership.');
-
-const growthReq=(query:string,role='editor')=>new Request('https://test.invalid/api/commercial?view=growth&'+query,{headers:{'x-test-role':role}});
-assert.equal((await route.GET(growthReq('',''))).status,401);
-const growthResult=await (await route.GET(growthReq('','viewer'))).json();assert.equal(growthResult.clients.length,1);assert.equal(growthResult.clients[0].segment,'B2B · Payment24');assert.equal(growthResult.clients[0].current.grossMargin,25);assert.equal(growthResult.clients[0].periods[0].sales,400);
-assert.equal((await route.GET(growthReq('cadence=invalid'))).status,400);
-assert.equal((await route.GET(growthReq('baseStart=2026-10-01&baseEnd=2026-10-15&currentStart=2026-10-10&currentEnd=2026-10-20'))).status,400);
-assert.equal((await route.GET(growthReq('start=2026-02-30'))).status,400);
-assert.equal((await (await route.GET(growthReq('segment=nonexistent'))).json()).clients.length,0);
-console.log('PASS growth API: member-only read, viewer access, same stored source, B2B matching, exact segment and date validation.');

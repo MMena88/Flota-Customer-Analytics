@@ -33,11 +33,51 @@ ok((await call('uploads',{action:'finish',uploadId:intent.data.uploadId})).statu
 objects.set(intent.data.path,source);
 ok((await call('uploads',{action:'finish',uploadId:intent.data.uploadId})).status===200,'The exact original source can be archived privately');
 ok((await response('fleet/import',undefined,'?id='+sourceJob.id+'&download=1')).status===302,'Original source download redirects after authorization');
+// Growth must reconcile with Panel de flota, never the commercial directory.
+const commercialOnly=(await call('clients',{name:'Solo Commercial',segment:'Lubricants Wholesale'})).data.client;
+let growth=(await call('fleet',undefined,'?view=growth')).data;
+overview=(await call('fleet')).data;
+assert.equal(growth.clients.length,overview.clients.length);
+assert.ok(!growth.clients.some(c=>c.customerId===commercialOnly.id));
+const sumGrowth=(g,key)=>g.clients.reduce((sum,c)=>sum+c.periods.reduce((s,p)=>s+p[key],0),0);
+assert.equal(sumGrowth(growth,'volume'),overview.total.volume);
+assert.equal(sumGrowth(growth,'amount'),overview.total.amount);
+assert.equal(sumGrowth(growth,'rows'),overview.total.purchases+overview.total.refunds);
+assert.ok(growth.clients.find(c=>c.name==='Cliente Uno').codes.length===2);
+ok(true,'Fleet growth uses only Payment24 clients and reconciles approved purchases minus refunds with the fleet panel');
+const october=[{...row,transaction_id:'oct-buy',date:'2026-10-01',volume_milli:20000,amount_cents:8000},{...refund,transaction_id:'oct-refund',date:'2026-10-02',volume_milli:5000,amount_cents:2000},{...preauth,transaction_id:'oct-preauth',date:'2026-10-03',volume_milli:100000,amount_cents:40000},{...declined,transaction_id:'oct-declined',date:'2026-10-04',volume_milli:100000,amount_cents:40000}];
+job=await start('f',october.length);await batch(job,0,october);await finish(job);
+const comparison='?view=growth&baseStart=2026-09-01&baseEnd=2026-09-30&currentStart=2026-10-01&currentEnd=2026-10-30';
+growth=(await call('fleet',undefined,comparison)).data;
+const firstGrowth=growth.clients.find(c=>c.name==='Cliente Uno');assert.equal(firstGrowth.current.volume,15);assert.equal(firstGrowth.current.amount,60);assert.equal(firstGrowth.current.rows,2);assert.equal(firstGrowth.baseline.volume,18.125);
+const growthDomain=await import(pathToFileURL(tmp+'/lib/fleet-growth-domain.mjs'));
+assert.ok(Math.abs(growthDomain.compareGrowth(firstGrowth.baseline,firstGrowth.current,'volume').pct-(-17.24137931034483))<1e-9);
+assert.deepEqual(growthDomain.defaultComparison('2026-10-30','month'),{baseline:{start:'2026-09-01',end:'2026-09-30'},current:{start:'2026-10-01',end:'2026-10-30'}});
+assert.deepEqual(growthDomain.defaultComparison('2024-03-31','month'),{baseline:{start:'2024-02-01',end:'2024-02-29'},current:{start:'2024-03-01',end:'2024-03-29'}});
+assert.equal(growthDomain.growthChange(0,10).pct,null);assert.equal(growthDomain.growthChange(-5,10).delta,15);assert.equal(growthDomain.growthChange(10,null).status,'onlyBaseline');
+assert.equal((await call('fleet',undefined,'?view=growth&baseStart=2026-10-01&baseEnd=2026-10-20&currentStart=2026-10-10&currentEnd=2026-10-30')).status,400);
+assert.equal((await call('fleet',undefined,'?view=growth&start=2026-02-30')).status,400);
+assert.equal((await call('fleet',undefined,'?view=growth&cadence=invalid')).status,400);
+assert.equal((await call('fleet',undefined,'?view=growth',null)).status,401);
+assert.equal((await call('fleet',undefined,'?view=growth','viewer')).status,200);
+const missingProduct=(await call('fleet',undefined,'?view=growth&product=unknown')).data;assert.equal(missingProduct.clients.length,growth.clients.length);assert.equal(sumGrowth(missingProduct,'rows'),0);
+ok(true,'Fleet growth custom dates, exact consumption/amounts, missing periods, positive-base percentages, filters and access control verified');
+
 if(process.argv[2]){
  await clear();const file=await fs.readFile(process.argv[2]),parsed=await parser.readPaymentXlsx(new Blob([file]));ok(parsed.rows.length>0&&parsed.errors.length===0,'Full Payment24 XLSX parses without dropping rows');ok(parsed.duplicates===0,'File IDs and independent decimal control totals reconcile');
  job=await start('d',parsed.rows.length);for(let i=0;i<parsed.rows.length;i+=250){await batch(job,i,parsed.rows.slice(i,i+250));if(i%25000===0)console.log('Imported locally '+i);}await finish(job);overview=(await call('fleet')).data;assert.equal(overview.total.events,parsed.rows.length);assert.equal(overview.clients.length,parsed.clients);assert.equal(overview.total.volume,parsed.volume);assert.equal(overview.total.amount,parsed.amount);assert.equal(overview.total.purchases,parsed.purchases);assert.equal(overview.total.refunds,parsed.refunds);ok(overview.accounts.length===parsed.accounts,'All source rows reconcile through authenticated routes and PostgreSQL');
- const current=(await call('fleet',undefined,'?start=2026-10-01&end=2026-10-21')).data;ok(current.period.compareCovered&&current.clients.every(c=>c.days_since===null||c.days_since>=0),'Same-length period comparisons and recency use source cutoff');
+ const last=overview.bounds.last,startDate=new Date(Date.parse(last)-20*86400000).toISOString().slice(0,10),previousStart=new Date(Date.parse(last)-41*86400000).toISOString().slice(0,10);const current=(await call('fleet',undefined,'?start='+startDate+'&end='+last)).data;ok(current.period.compareCovered===(previousStart>=overview.bounds.first)&&current.clients.every(c=>c.days_since===null||c.days_since>=0),'Same-length period comparisons respect the actual source coverage and cutoff');
  const first=overview.clients[0];const detail=(await call('fleet',undefined,'?client='+first.client_id)).data;assert.equal(detail.total.volume,first.volume);const events=(await call('fleet/transactions',undefined,'?client='+first.client_id+'&class=purchase')).data;assert.equal(events.total,first.purchases);ok(events.rows.length===100,'Top client drilldown and pagination reconcile with ranking');
+
+
+ const g=(await call('fleet',undefined,'?view=growth')).data;
+ assert.equal(g.clients.length,overview.clients.length);
+ assert.deepEqual(new Set(g.clients.map(c=>c.customerId)),new Set(overview.clients.map(c=>c.client_id)));
+ assert.ok(Math.abs(sumGrowth(g,'volume')-overview.total.volume)<.00001);
+ assert.ok(Math.abs(sumGrowth(g,'amount')-overview.total.amount)<.00001);
+ assert.equal(sumGrowth(g,'rows'),overview.total.purchases+overview.total.refunds);
+ for(const prod of overview.products){const perProduct=(await call('fleet',undefined,'?product='+encodeURIComponent(prod||'__missing__'))).data,pg=(await call('fleet',undefined,'?view=growth&product='+encodeURIComponent(prod||'__missing__'))).data;assert.ok(Math.abs(sumGrowth(pg,'volume')-perProduct.total.volume)<.00001);assert.ok(Math.abs(sumGrowth(pg,'amount')-perProduct.total.amount)<.00001);}
+ console.log(JSON.stringify({fleetGrowthVerified:true,clients:g.clients.length,periods:g.periods.map(p=>({label:p.label,partial:p.partial})),volume:sumGrowth(g,'volume'),amount:sumGrowth(g,'amount'),products:overview.products.length}));
 
  console.log(JSON.stringify({fullFileVerified:true,rows:overview.total.events,clients:overview.clients.length,volume:overview.total.volume,amount:overview.total.amount}));
 }

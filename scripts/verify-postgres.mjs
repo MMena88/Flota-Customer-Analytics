@@ -11,7 +11,7 @@ delete process.env.OPENAI_API_KEY;
 const root=process.cwd(),tmp=path.join(root,'.tmp/verification');
 await fs.mkdir(tmp,{recursive:true});
 const names=['clients','workspace','import','activities','documents','markets','assistant','fleet','fleet/import','fleet/transactions','uploads'];
-const files=['lib/domain.ts','lib/server.ts','lib/database.ts','lib/api-guard.ts','lib/api.ts','lib/auth.ts','lib/fleet-domain.ts','lib/fleet-server.ts','lib/payment-xlsx.ts','lib/supabase/config.ts',...names.map(x=>`app/api/${x}/route.ts`)];
+const files=['lib/domain.ts','lib/server.ts','lib/database.ts','lib/api-guard.ts','lib/api.ts','lib/auth.ts','lib/fleet-domain.ts','lib/fleet-server.ts','lib/fleet-growth-domain.ts','lib/fleet-growth-server.ts','lib/payment-xlsx.ts','lib/supabase/config.ts',...names.map(x=>`app/api/${x}/route.ts`)];
 for(const file of files){
  let code=ts.transpileModule(await fs.readFile(path.join(root,file),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
  code=code.replace(/from ['"]@\/lib\/(.*?)['"]/g,(_,name)=>`from '${pathToFileURL(path.join(tmp,'lib',name+'.mjs'))}'`).replace(/from ['"]\.\/([^'"]+)['"]/g,(_,name)=>`from './${name}.mjs'`);
