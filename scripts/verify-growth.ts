@@ -33,6 +33,8 @@ assert.throws(()=>summarizeGrowth(rows,[],{start:'2026-02-30'}),/fechas/);
 assert.throws(()=>summarizeGrowth(rows,[],{cadence:'week',start:'2020-01-01'}),/240 períodos/);
 assert.equal(summarizeGrowth([],[]).clients.length,0);
 const sparse=summarizeGrowth([row,{...row,date:'2026-10-01'}],[]);assert.equal(sparse.clients[0].periods[1].rows,0);assert.equal(growthValue(sparse.clients[0].periods[1],'sales',true),null);
+const infrequent=summarizeGrowth([row,{...row,date:'2026-08-12',product:'Esporádico'},{...row,date:'2026-09-05',product:'Esporádico'},{...row,date:'2026-10-30'}],[],{product:'Esporádico'});
+assert.deepEqual(infrequent.periods.map(p=>p.partial),[false,false,true]);
 const b2b=summarizeGrowth([row,{...row,date:'2026-09-01',name:'EJEMPLO, S.A.'}],['ejemplo sa'],filter);assert.equal(b2b.clients.length,1);assert.equal(b2b.clients[0].segment,'B2B · Payment24');
 const ambiguous=summarizeGrowth([row,{...row,code:'99'}],['Ejemplo SA']);assert.equal(ambiguous.clients.length,2);assert.ok(ambiguous.clients.every(c=>c.segment===row.segment));
 assert.equal(summarizeGrowth([row,{...row,code:'99'}],['Ejemplo SA'],{confirmedNames:[customerKey(row.name)]}).clients.length,1);

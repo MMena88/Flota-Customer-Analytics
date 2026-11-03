@@ -67,7 +67,9 @@ export function summarizeGrowth(rows:CommercialRow[],names:string[],filter:Growt
  const current=checkedRange(filter.currentStart||defaults.current.start,filter.currentEnd||defaults.current.end,'el período actual');
  if(baseline.end>=current.start)throw new Error('El período base debe terminar antes de que comience el período actual.');
  const periods:GrowthPeriod[]=[];
- for(let date=calendarPeriod(history.start,cadence).start;date<=history.end;){const natural=calendarPeriod(date,cadence),start=natural.start<history.start?history.start:natural.start,end=natural.end>history.end?history.end:natural.end;periods.push({key:natural.start,label:periodLabel(natural.start,cadence),start,end,partial:start!==natural.start||end!==natural.end||!scopeBounds.first||start<scopeBounds.first||end>scopeBounds.last,recordDays:0});date=shiftDay(natural.end,1);}
+ // Use the loaded file's bounds, not the first/last purchase of a filtered
+ // product or customer: an infrequent purchase does not make a month partial.
+ for(let date=calendarPeriod(history.start,cadence).start;date<=history.end;){const natural=calendarPeriod(date,cadence),start=natural.start<history.start?history.start:natural.start,end=natural.end>history.end?history.end:natural.end;periods.push({key:natural.start,label:periodLabel(natural.start,cadence),start,end,partial:start!==natural.start||end!==natural.end||start<bounds.first||end>bounds.last,recordDays:0});date=shiftDay(natural.end,1);}
  if(periods.length>240)throw new Error('La gráfica admite hasta 240 períodos. Acortá el rango o agrupá por mes o trimestre.');
  const indices=new Map(periods.map((p,i)=>[p.key,i])),periodDates=periods.map(()=>new Set<string>()),baseDates=new Set<string>(),currentDates=new Set<string>(),clients=new Map<string,GrowthClient>();let unidentifiedRows=0;
  for(const {row:r,identity} of scoped){
@@ -84,7 +86,7 @@ export function summarizeGrowth(rows:CommercialRow[],names:string[],filter:Growt
  periods.forEach((p,i)=>p.recordDays=periodDates[i].size);
  const baselineDays=rangeDays(baseline),currentDays=rangeDays(current),warnings:string[]=[];
  if(baselineDays!==currentDays)warnings.push(`Los períodos tienen distinta duración: ${baselineDays} y ${currentDays} días. El cambio compara acumulados, sin extrapolar.`);
- for(const [label,range,count] of [['base',baseline,baseDates.size],['actual',current,currentDates.size]] as const){if(!count)warnings.push(`No hay registros cargados para el período ${label} con estos filtros.`);else if(range.start<scopeBounds.first||range.end>scopeBounds.last)warnings.push(`El período ${label} se extiende fuera de las fechas con datos del segmento/producto.`);}
+ for(const [label,range,count] of [['base',baseline,baseDates.size],['actual',current,currentDates.size]] as const){if(!count)warnings.push(`No hay registros cargados para el período ${label} con estos filtros.`);else if(range.start<bounds.first||range.end>bounds.last)warnings.push(`El período ${label} se extiende fuera del histórico cargado.`);}
  if(periods.some(p=>p.partial))warnings.push('La gráfica incluye períodos parciales. Sus cambios porcentuales frente a períodos de distinta cobertura no se calculan.');
  return {...options,clients:[...clients.values()].sort((a,b)=>a.name.localeCompare(b.name)||a.segment.localeCompare(b.segment)),periods,comparison:{baseline,current,baselineDays,currentDays,baselineRecordDays:baseDates.size,currentRecordDays:currentDates.size},history,unidentifiedRows,warnings};
 }
