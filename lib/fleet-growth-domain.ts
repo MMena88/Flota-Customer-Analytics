@@ -3,7 +3,7 @@ export type GrowthMetric='volume'|'amount';
 export type GrowthTotals={rows:number;volume:number;amount:number};
 export type DateRange={start:string;end:string};
 export type GrowthPeriod=DateRange&{key:string;label:string;partial:boolean;recordDays:number};
-export type GrowthClient={key:string;customerId:string;name:string;codes:string[];baseline:GrowthTotals;current:GrowthTotals;periods:GrowthTotals[]};
+export type GrowthClient={key:string;customerId:string;name:string;owner:string;codes:string[];baseline:GrowthTotals;current:GrowthTotals;periods:GrowthTotals[]};
 export type GrowthStatus='up'|'down'|'flat'|'onlyCurrent'|'onlyBaseline'|'noBase'|'noData';
 export const growthStatusLabels:Record<GrowthStatus,string>={up:'En crecimiento',down:'En caída',flat:'Sin cambio',onlyCurrent:'Solo período actual',onlyBaseline:'Sin registros actuales',noBase:'Sin base comparable',noData:'Sin registros en ambos'};
 export const emptyTotals=():GrowthTotals=>({rows:0,volume:0,amount:0});
@@ -17,7 +17,7 @@ export function growthChange(previous:number|null,current:number|null):{pct:numb
 export const compareGrowth=(previous:GrowthTotals,current:GrowthTotals,metric:GrowthMetric)=>growthChange(growthValue(previous,metric),growthValue(current,metric));
 export type GrowthFilter={cadence?:Cadence;start?:string;end?:string;baseStart?:string;baseEnd?:string;currentStart?:string;currentEnd?:string};
 export type FleetGrowthDaily=GrowthTotals&{client_id:string;date:string};
-export type FleetGrowthAccount={client_id:string;account:string;name:string};
+export type FleetGrowthAccount={client_id:string;account:string;name:string;owner?:string};
 export type GrowthBounds={first:string;last:string};
 const DAY=86400000;
 const timestamp=(day:string)=>Date.parse(day+'T00:00:00Z');
@@ -55,7 +55,7 @@ export function planFleetGrowth(bounds:GrowthBounds,filter:GrowthFilter={}){
 export function summarizeFleetGrowth(daily:FleetGrowthDaily[],accounts:FleetGrowthAccount[],bounds:GrowthBounds,filter:GrowthFilter={}){
  const {cadence,history,baseline,current,periods}=planFleetGrowth(bounds,filter),clients=new Map<string,GrowthClient>();
  // Only accounts present in published Payment24 transactions enter this list.
- for(const a of accounts){let c=clients.get(a.client_id);if(!c){c={key:a.client_id,customerId:a.client_id,name:a.name,codes:[],baseline:emptyTotals(),current:emptyTotals(),periods:periods.map(emptyTotals)};clients.set(a.client_id,c);}if(!c.codes.includes(a.account))c.codes.push(a.account);}
+ for(const a of accounts){let c=clients.get(a.client_id);if(!c){c={key:a.client_id,customerId:a.client_id,name:a.name,owner:(a.owner||'').trim(),codes:[],baseline:emptyTotals(),current:emptyTotals(),periods:periods.map(emptyTotals)};clients.set(a.client_id,c);}if(!c.codes.includes(a.account))c.codes.push(a.account);}
  const indices=new Map(periods.map((p,i)=>[p.key,i])),periodDates=periods.map(()=>new Set<string>()),baseDates=new Set<string>(),currentDates=new Set<string>();
  for(const r of daily){const client=clients.get(r.client_id);if(!client)continue;
   if(inside(r.date,baseline)){addTotals(client.baseline,r);baseDates.add(r.date);}
@@ -66,9 +66,9 @@ export function summarizeFleetGrowth(daily:FleetGrowthDaily[],accounts:FleetGrow
  const baselineDays=baseline.start?rangeDays(baseline):0,currentDays=current.start?rangeDays(current):0,warnings:string[]=[];
  if(bounds.last){
   if(baselineDays!==currentDays)warnings.push(`Los períodos tienen distinta duración: ${baselineDays} y ${currentDays} días. El cambio compara acumulados, sin extrapolar.`);
-  for(const [label,range,count] of [['base',baseline,baseDates.size],['actual',current,currentDates.size]] as const){if(!count)warnings.push(`No hay compras o devoluciones aprobadas en el período ${label} con este filtro de combustible.`);else if(range.start<bounds.first||range.end>bounds.last)warnings.push(`El período ${label} se extiende fuera del histórico Payment24 cargado.`);}
+  for(const [label,range,count] of [['base',baseline,baseDates.size],['actual',current,currentDates.size]] as const){if(!count)warnings.push(`No hay compras o devoluciones aprobadas en el período ${label} con los filtros seleccionados.`);else if(range.start<bounds.first||range.end>bounds.last)warnings.push(`El período ${label} se extiende fuera del histórico Payment24 cargado.`);}
   if(periods.some(p=>p.partial))warnings.push('La gráfica incluye períodos parciales. Sus cambios porcentuales frente a períodos de distinta cobertura no se calculan.');
  }
  return {clients:[...clients.values()].sort((a,b)=>a.name.localeCompare(b.name)),periods,bounds,comparison:{baseline,current,baselineDays,currentDays,baselineRecordDays:baseDates.size,currentRecordDays:currentDates.size},history,cadence,warnings};
 }
-export type GrowthResult=ReturnType<typeof summarizeFleetGrowth>&{products:string[];source:string;updatedAt:string};
+export type GrowthResult=ReturnType<typeof summarizeFleetGrowth>&{products:string[];source:string;updatedAt:string;tms:import('./fleet-tm').FleetTmOption[]};

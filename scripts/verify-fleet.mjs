@@ -63,6 +63,41 @@ assert.equal((await call('fleet',undefined,'?view=growth','viewer')).status,200)
 const missingProduct=(await call('fleet',undefined,'?view=growth&product=unknown')).data;assert.equal(missingProduct.clients.length,growth.clients.length);assert.equal(sumGrowth(missingProduct,'rows'),0);
 ok(true,'Fleet growth custom dates, exact consumption/amounts, missing periods, positive-base percentages, filters and access control verified');
 
+
+// TM membership is current client metadata, independent of financial rows.
+const beforeTm=(await call('fleet')).data;
+const firstClient=(await engine.query("SELECT * FROM app_private.clients WHERE name='Cliente Uno'")).rows[0];
+const assigned=await call('clients',{...firstClient,owner:'TM Norte'});assert.equal(assigned.status,200);
+await call('clients',{...commercialOnly,owner:'TM Norte'});
+const afterTm=(await call('fleet')).data;
+assert.deepEqual(afterTm.total,beforeTm.total);
+assert.equal(afterTm.clients.length,beforeTm.clients.length);
+const queryTm='?tm='+encodeURIComponent('TM Norte');
+const tmPanel=(await call('fleet',undefined,queryTm)).data,tmGrowth=(await call('fleet',undefined,queryTm+'&view=growth')).data,tmEvents=(await call('fleet/transactions',undefined,queryTm)).data;
+assert.equal(tmPanel.clients.length,1);assert.equal(tmGrowth.clients.length,1);
+assert.equal(tmPanel.clients[0].owner,'TM Norte');assert.equal(tmGrowth.clients[0].owner,'TM Norte');
+assert.equal(tmPanel.clients[0].accounts.length,2);
+assert.equal(tmPanel.tms.find(t=>t.value==='TM Norte').clients,1);
+assert.equal(tmPanel.tms.find(t=>t.value==='__unassigned__').clients,1);
+assert.deepEqual(tmGrowth.tms,tmPanel.tms);
+assert.equal(sumGrowth(tmGrowth,'volume'),tmPanel.total.volume);assert.equal(sumGrowth(tmGrowth,'amount'),tmPanel.total.amount);
+assert.equal(tmEvents.total,tmPanel.total.events);assert.ok(tmEvents.rows.every(r=>r.client_id===firstClient.id));
+const noTm=(await call('fleet',undefined,'?tm=__unassigned__')).data,noTmGrowth=(await call('fleet',undefined,'?tm=__unassigned__&view=growth')).data;
+assert.equal(noTm.clients.length,1);assert.equal(noTmGrowth.clients.length,1);assert.equal(noTm.clients[0].name,'Cliente Dos');
+assert.equal(tmPanel.total.volume+noTm.total.volume,afterTm.total.volume);
+assert.equal(sumGrowth(noTmGrowth,'volume'),noTm.total.volume);
+const intersect=(await call('fleet',undefined,queryTm+'&client='+noTm.clients[0].client_id)).data;assert.equal(intersect.clients.length,0);assert.equal(intersect.total.volume,0);
+const unknown=(await call('fleet',undefined,'?tm='+encodeURIComponent("Unknown' OR 1=1 --"))).data;assert.equal(unknown.clients.length,0);assert.equal(unknown.total.volume,0);
+const dateTm=(await call('fleet',undefined,queryTm+'&start=2026-10-01&end=2026-10-31&product=Diesel')).data;assert.equal(dateTm.total.volume,15);
+const tmPlan=await call('import',{kind:'clients',rows:[{nombre:firstClient.name,segmento:firstClient.segment,codigo:firstClient.code,ejecutivo:'TM Sur'}]});assert.equal(tmPlan.status,200);assert.equal(tmPlan.data.created,0);assert.equal(tmPlan.data.updated,1);
+const tmImport=await call('import',{kind:'clients',rows:[{nombre:firstClient.name,segmento:firstClient.segment,codigo:firstClient.code,ejecutivo:'TM Sur'}],source:'TM fixture',token:tmPlan.data.token,commit:true});assert.equal(tmImport.status,200);
+const moved=(await call('fleet',undefined,'?tm=TM%20Sur')).data;assert.deepEqual(moved.total,tmPanel.total);
+assert.equal((await call('fleet',undefined,queryTm)).data.clients.length,0);
+job=await start('1',1);await batch(job,0,[{...row,transaction_id:'new-account-same-client',account:'a4'}]);await finish(job);
+const retained=(await call('fleet',undefined,'?tm=TM%20Sur')).data;assert.equal(retained.clients[0].owner,'TM Sur');assert.equal(retained.clients[0].accounts.length,3);assert.equal(retained.tms.find(t=>t.value==='TM Sur').clients,1);
+assert.equal((await call('fleet',undefined,'?tm=TM%20Sur','viewer')).status,200);
+ok(true,'TM filters reconcile panel, growth, transactions, dates and fuel; unassigned clients remain visible, multi-account clients count once, assignments persist across Payment24 imports');
+
 if(process.argv[2]){
  await clear();const file=await fs.readFile(process.argv[2]),parsed=await parser.readPaymentXlsx(new Blob([file]));ok(parsed.rows.length>0&&parsed.errors.length===0,'Full Payment24 XLSX parses without dropping rows');ok(parsed.duplicates===0,'File IDs and independent decimal control totals reconcile');
  job=await start('d',parsed.rows.length);for(let i=0;i<parsed.rows.length;i+=250){await batch(job,i,parsed.rows.slice(i,i+250));if(i%25000===0)console.log('Imported locally '+i);}await finish(job);overview=(await call('fleet')).data;assert.equal(overview.total.events,parsed.rows.length);assert.equal(overview.clients.length,parsed.clients);assert.equal(overview.total.volume,parsed.volume);assert.equal(overview.total.amount,parsed.amount);assert.equal(overview.total.purchases,parsed.purchases);assert.equal(overview.total.refunds,parsed.refunds);ok(overview.accounts.length===parsed.accounts,'All source rows reconcile through authenticated routes and PostgreSQL');
