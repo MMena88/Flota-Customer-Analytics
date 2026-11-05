@@ -3,19 +3,19 @@
 import {useEffect, useMemo, useState, type FormEvent} from 'react';
 import {ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarDays, Download, Search} from 'lucide-react';
 import {customerKey} from '@/lib/commercial';
+import {fuelFamilyOf, selectionName, type FuelFamily, type ProductSelection} from '@/lib/commercial-products';
+import {FuelGroupGuide, ProductPicker} from './commercial-products';
 import type {CommercialComparison, ComparisonClient, ComparisonMode, ComparisonQuery, Coverage} from '@/lib/commercial-comparison';
 import {date, download, Empty, Kpi, number} from './ui';
 import './commercial-comparison.css';
 
 type Periods = NonNullable<CommercialComparison['periods']>;
 type Segment = CommercialComparison['segments'][number];
-type Scope = {segment: string; product: string | null};
 const volume = (n: number) => number(n, 2);
 const signed = (n: number | null, suffix = '') => n === null ? '—' : (n > 0 ? '+' : '') + volume(n) + suffix;
 const direction = (n: number | null) => n === null || !n ? '' : n > 0 ? 'volume-gain' : 'volume-loss';
 const observed = (value: number, coverage: Coverage) => coverage.loaded ? volume(value) : 'Sin datos';
 const periodLabel = (p: {start: string; end: string}) => date(p.start) + ' – ' + date(p.end);
-const productName = (p: string) => !p || p === 'NONE' ? 'Sin producto informado' : p;
 const modeNames: Record<ComparisonMode, string> = {months: 'Dos meses', ytd: 'Acumulado del año (YTD)', custom: 'Fechas personalizadas'};
 const monthLabel = (s: string) => new Date(s + '-01T12:00:00Z').toLocaleDateString('es-SV', {year: 'numeric', month: 'long', timeZone: 'UTC'});
 
@@ -77,27 +77,44 @@ function csvCell(value: string | number | null) {
 function exportComparison(data: CommercialComparison, clients = data.clients) {
   const p = data.periods;
   if (!p) return;
-  const headers = ['Segmento', 'Producto', ...(data.segment ? ['Cliente', 'Código'] : []), 'Inicio base', 'Fin base', 'Inicio actual', 'Fin actual', 'Días cargados base', 'Días cargados actual', 'Volumen base registrado', 'Volumen actual registrado', 'Cambio en volumen', 'Crecimiento %', ...(data.segment ? ['Aporte al segmento (pp)'] : [])];
+  const members = data.family ? data.catalog.filter(raw => fuelFamilyOf(raw) === data.family).join(' | ') : '';
+  const headers = ['Segmento', 'Producto', ...(data.family ? ['Referencias del grupo en el catálogo'] : []), ...(data.segment ? ['Cliente', 'Código'] : []), 'Inicio base', 'Fin base', 'Inicio actual', 'Fin actual', 'Días cargados base', 'Días cargados actual', 'Volumen base registrado', 'Volumen actual registrado', 'Cambio en volumen', 'Crecimiento %', ...(data.segment ? ['Aporte al segmento (pp)'] : [])];
   const line = (s: Segment | ComparisonClient) => {
     const client = 'identified' in s ? s : null;
-    return [data.segment || s.name, data.product === null ? 'Todos los productos' : productName(data.product), ...(client ? [client.name, client.codes.join(', ')] : []), p.base.start, p.base.end, p.current.start, p.current.end, p.base.loaded, p.current.loaded, p.base.loaded ? s.base : null, p.current.loaded ? s.current : null, s.delta, s.pct, ...(client ? [client.points] : [])];
+    return [data.segment || s.name, (data.family ? 'Grupo · ' : '') + selectionName(data), ...(data.family ? [members] : []), ...(client ? [client.name, client.codes.join(', ')] : []), p.base.start, p.base.end, p.current.start, p.current.end, p.base.loaded, p.current.loaded, p.base.loaded ? s.base : null, p.current.loaded ? s.current : null, s.delta, s.pct, ...(client ? [client.points] : [])];
   };
   const rows = [headers, ...(data.segment ? clients : data.segments).map(line)];
   download('Comparacion_volumen_' + p.current.end + '.csv', rows.map(row => row.map(csvCell).join(',')).join('\r\n'));
 }
 
-function SegmentOverview({data, onSelect}: {data: CommercialComparison; onSelect: (name: string) => void}) {
-  const p = data.periods!;
-  const maxPct = Math.max(1, ...data.segments.map(s => Math.abs(s.pct || 0)));
+function VolumeSummaryTable<T extends Segment>({rows, periods, firstColumn, onSelect, total}: {
+  rows: T[]; periods: Periods; firstColumn: string; onSelect: (row: T) => void; total?: Segment;
+}) {
+  const maxPct = Math.max(1, ...rows.map(s => Math.abs(s.pct || 0)));
+  return <div className="volume-tablescroll"><table className="volume-table">
+    <thead><tr><th>{firstColumn}</th><th>Volumen base</th><th>Volumen actual</th><th>Cambio en volumen</th><th>Crecimiento</th></tr></thead>
+    <tbody>{rows.map(s => <tr key={s.name}>
+      <td><button type="button" className="volume-drill" onClick={() => onSelect(s)}>{s.name}<ArrowRight size={15}/></button></td>
+      <td>{observed(s.base, periods.base)}</td><td>{observed(s.current, periods.current)}</td><td className={direction(s.delta)}>{signed(s.delta)}</td>
+      <td><div className="volume-pct-cell"><span className={direction(s.pct)}>{signed(s.pct, ' %')}</span>{s.pct !== null && <i aria-hidden="true" className="volume-mini-track"><i className={s.pct < 0 ? 'loss' : ''} style={{width: Math.max(1, Math.abs(s.pct) / maxPct * 100) + '%'}}/></i>}</div></td>
+    </tr>)}</tbody>
+    {total && <tfoot><tr><th>Total · {total.name}</th><td>{observed(total.base, periods.base)}</td><td>{observed(total.current, periods.current)}</td><td>{signed(total.delta)}</td><td>{signed(total.pct, ' %')}</td></tr></tfoot>}
+  </table></div>;
+}
+
+function FamilyOverview({data, onSelect}: {data: CommercialComparison; onSelect: (family: FuelFamily) => void}) {
+  if (data.family || data.product !== null || !data.fuelSummary.length) return null;
   return <section className="panel volume-panel">
-    <div className="panel-head"><div><h2>Consumo por segmento</h2><p>Elegí un segmento para ver qué clientes explican su variación.</p></div>
+    <div className="panel-head"><div><h2>Consumo por grupo de combustible</h2><p>{data.segment || 'Todos los segmentos'} · Elegí un grupo para ver qué explica su cambio.</p></div></div>
+    <VolumeSummaryTable rows={data.fuelSummary} periods={data.periods!} firstColumn="Grupo" onSelect={row => onSelect(row.id)}/>
+  </section>;
+}
+
+function SegmentOverview({data, onSelect}: {data: CommercialComparison; onSelect: (name: string) => void}) {
+  return <section className="panel volume-panel">
+    <div className="panel-head"><div><h2>Consumo por segmento{data.family || data.product !== null ? ' · ' + selectionName(data) : ''}</h2><p>Elegí un segmento para ver qué clientes explican su variación.</p></div>
       <button className="button secondary" onClick={() => exportComparison(data)}><Download size={16}/> Exportar segmentos</button></div>
-    <div className="volume-tablescroll"><table className="volume-table"><thead><tr><th>Segmento</th><th>Volumen base</th><th>Volumen actual</th><th>Cambio en volumen</th><th>Crecimiento</th></tr></thead>
-      <tbody>{data.segments.map(s => <tr key={s.name}>
-        <td><button type="button" className="volume-drill" onClick={() => onSelect(s.name)}>{s.name}<ArrowRight size={15}/></button></td>
-        <td>{observed(s.base, p.base)}</td><td>{observed(s.current, p.current)}</td><td className={direction(s.delta)}>{signed(s.delta)}</td>
-        <td><div className="volume-pct-cell"><span className={direction(s.pct)}>{signed(s.pct, ' %')}</span>{s.pct !== null && <i aria-hidden="true" className="volume-mini-track"><i className={s.pct < 0 ? 'loss' : ''} style={{width: Math.max(1, Math.abs(s.pct) / maxPct * 100) + '%'}}/></i>}</div></td>
-      </tr>)}</tbody></table></div>
+    <VolumeSummaryTable rows={data.segments} periods={data.periods!} firstColumn="Segmento" onSelect={s => onSelect(s.name)} total={data.family ? data.fuelSummary[0] : undefined}/>
   </section>;
 }
 
@@ -128,7 +145,7 @@ function clientStatus(c: ComparisonClient, comparable: boolean) {
   return c.base <= 0 ? 'Sin base positiva' : '';
 }
 
-function ClientBreakdown({data}: {data: CommercialComparison}) {
+function ClientBreakdown({data, onFamily}: {data: CommercialComparison; onFamily: (family: FuelFamily) => void}) {
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<ComparisonClient | null>(null);
   const [order, setOrder] = useState('impact');
@@ -150,36 +167,39 @@ function ClientBreakdown({data}: {data: CommercialComparison}) {
   }
 
   return <>
-    <div className="volume-detail-title"><h2>{segment.name}</h2><span>{data.product === null ? 'Todos sus productos' : productName(data.product)}</span></div>
+    <div className="volume-detail-title"><h2>{segment.name}</h2><span>{selectionName(data)}</span></div>
     <div className="kpi-grid volume-kpis">
       <Kpi label="Volumen base" value={observed(segment.base, p.base)} detail={p.base.complete ? periodLabel(p.base) : 'Volumen registrado en los días cargados'}/>
       <Kpi label="Volumen actual" value={observed(segment.current, p.current)} detail={p.current.complete ? periodLabel(p.current) : 'Volumen registrado en los días cargados'}/>
       <Kpi label="Cambio en volumen" value={signed(segment.delta)} detail="Volumen actual menos volumen base"/>
-      <Kpi label="Crecimiento del segmento" value={signed(segment.pct, ' %')} detail={data.comparable ? (segment.base > 0 ? 'Respecto al volumen base' : 'Se requiere un volumen base positivo') : 'Pendiente de cobertura'}/>
+      <Kpi label={data.family ? 'Crecimiento del grupo' : data.product !== null ? 'Crecimiento del producto' : 'Crecimiento del segmento'} value={signed(segment.pct, ' %')} detail={data.comparable ? (segment.base > 0 ? 'Respecto al volumen base' : 'Se requiere un volumen base positivo') : 'Pendiente de cobertura'}/>
     </div>
+    <FamilyOverview data={data} onSelect={onFamily}/>
     {data.comparable && <ImpactChart clients={data.clients} onSelect={chooseClient}/>}
     <section className="panel volume-panel" id="volume-client-detail">
-      <div className="panel-head"><div><h2>Aporte por cliente</h2><p>El cambio en volumen mide cuánto ganó o perdió cada cuenta. Su aporte en puntos porcentuales (pp) se calcula sobre el volumen base del segmento.</p></div>
+      <div className="panel-head"><div><h2>Aporte por cliente</h2><p>El cambio en volumen mide cuánto ganó o perdió cada cuenta. Su aporte en puntos porcentuales (pp) se calcula sobre el volumen base del segmento{data.family || data.product !== null ? ' para la selección de productos actual' : ''}.</p></div>
         <button className="button secondary" disabled={!clients.length} onClick={() => exportComparison(data, clients)}><Download size={16}/> Exportar clientes</button></div>
       <div className="volume-client-controls"><label>Buscar cliente<span className="volume-search"><Search size={16}/><input type="search" value={picked ? picked.name : query} placeholder="Nombre o código" onChange={e => {setPicked(null); setQuery(e.target.value);}}/></span></label>
         <label>Ordenar por<select value={order} onChange={e => setOrder(e.target.value)}><option value="impact">Mayor impacto en volumen</option><option value="up">Mayor aumento</option><option value="down">Mayor caída</option><option value="name">Nombre del cliente</option></select></label>
         {(query || picked) && <button className="text-link" onClick={() => {setPicked(null); setQuery('');}}>Ver todos los clientes</button>}</div>
       {clients.length ? <div className="volume-tablescroll"><table className="volume-table"><thead><tr><th>Cliente</th><th>Volumen base</th><th>Volumen actual</th><th>Cambio en volumen</th><th>Crecimiento</th><th>Aporte (pp)</th></tr></thead>
         <tbody>{clients.map(c => <tr key={c.id}><td><strong>{c.name}</strong>{c.codes.length > 0 && <small>{c.codes.join(', ')}</small>}<small>{clientStatus(c, data.comparable)}</small></td><td>{observed(c.base, p.base)}</td><td>{observed(c.current, p.current)}</td><td className={direction(c.delta)}>{signed(c.delta)}</td><td>{signed(c.pct, ' %')}</td><td className={direction(c.points)}>{signed(c.points)}</td></tr>)}</tbody>
-        <tfoot><tr><th>Total del segmento</th><td>{observed(segment.base, p.base)}</td><td>{observed(segment.current, p.current)}</td><td>{signed(segment.delta)}</td><td>{signed(segment.pct, ' %')}</td><td>{signed(segment.pct)}</td></tr></tfoot>
+        <tfoot><tr><th>{data.family || data.product !== null ? 'Total · ' + selectionName(data) : 'Total del segmento'}</th><td>{observed(segment.base, p.base)}</td><td>{observed(segment.current, p.current)}</td><td>{signed(segment.delta)}</td><td>{signed(segment.pct, ' %')}</td><td>{signed(segment.pct)}</td></tr></tfoot>
       </table></div> : <Empty title={data.clients.length ? 'Sin coincidencias' : 'Sin registros para estos períodos'} text={data.clients.length ? 'Probá con otro nombre o código.' : 'Elegí otro producto o cambiá las fechas para consultar actividad.'}/>}
       <p className="volume-method">El total incluye a todos los clientes del segmento y los movimientos sin cliente informado. Con ambos períodos cubiertos, una cuenta sin registros en uno de ellos aporta cero volumen en ese período. El guion indica cobertura insuficiente o una base igual a cero o negativa para el porcentaje.</p>
     </section>
   </>;
 }
 
-export function CommercialComparisonView({initialSegment, initialProduct}: {initialSegment: string; initialProduct: string}) {
-  const [scope, setScope] = useState<Scope>({segment: initialSegment, product: initialSegment && initialProduct ? initialProduct : null});
+export function CommercialComparisonView({segment, selection, selectSegment, selectProduct}: {
+  segment: string; selection: ProductSelection; selectSegment: (name: string) => void; selectProduct: (choice: ProductSelection) => void;
+}) {
   const [periodQuery, setPeriodQuery] = useState<ComparisonQuery>({});
   const [retry, setRetry] = useState(0);
   const params = new URLSearchParams({view: 'volume-comparison', ...periodQuery});
-  if (scope.segment) params.set('segment', scope.segment);
-  if (scope.product !== null) params.set('product', scope.product);
+  if (segment) params.set('segment', segment);
+  if (selection.family) params.set('family', selection.family);
+  if (selection.product !== undefined) params.set('product', selection.product);
   const url = '/api/commercial?' + params.toString();
   const requestKey = url + '#' + retry;
   const [result, setResult] = useState<{key: string; data: CommercialComparison} | null>(null);
@@ -205,7 +225,7 @@ export function CommercialComparisonView({initialSegment, initialProduct}: {init
   const current = result?.key === requestKey ? result.data : null;
   const error = !current && failure?.key === requestKey ? failure.message : '';
   const mode = periodQuery.mode || 'months';
-  function selectSegment(segment: string) { setScope({segment, product: null}); }
+  function selectFamily(family: FuelFamily) { selectProduct({family}); }
   function switchMode(next: ComparisonMode) {
     const p = data?.periods;
     setPeriodQuery(next === 'custom' && p ? {mode: next, baseStart: p.base.start, baseEnd: p.base.end, currentStart: p.current.start, currentEnd: p.current.end} : {mode: next});
@@ -213,19 +233,19 @@ export function CommercialComparisonView({initialSegment, initialProduct}: {init
 
   return <div className="volume-comparison">
     {data?.periods && <section className="panel volume-controls" aria-label="Configurar comparación">
-      <div className="volume-scope-controls"><label>Segmento<select value={scope.segment} onChange={e => selectSegment(e.target.value)}><option value="">Todos los segmentos</option>{data.segments.map(s => <option key={s.name}>{s.name}</option>)}</select></label>
-        {scope.segment && <label>Producto<select value={scope.product === null ? '*' : 'p' + scope.product} disabled={data.segment !== scope.segment} onChange={e => setScope({...scope, product: e.target.value === '*' ? null : e.target.value.slice(1)})}>
-          <option value="*">Todos los productos</option>{data.segment === scope.segment && data.products.map(p => <option key={p} value={'p' + p}>{productName(p)}</option>)}</select></label>}
+      <div className="volume-scope-controls"><label>Segmento<select value={segment} onChange={e => selectSegment(e.target.value)}><option value="">Todos los segmentos</option>{data.segments.map(s => <option key={s.name}>{s.name}</option>)}</select></label>
+        <ProductPicker products={data.products} selected={selection} disabled={data.segment !== segment} onChange={selectProduct}/>
         <small>Histórico cargado<br/><strong>{date(data.bounds.first)} – {date(data.bounds.last)}</strong></small></div>
+      <FuelGroupGuide catalog={data.catalog}/>
       <div className="volume-modes" role="group" aria-label="Tipo de comparación">{(Object.keys(modeNames) as ComparisonMode[]).map(m => <button key={m} type="button" aria-pressed={mode === m} onClick={() => switchMode(m)}>{modeNames[m]}</button>)}</div>
       {data.periods.mode === mode && <PeriodForm key={JSON.stringify([mode, data.periods.base.start, data.periods.base.end, data.periods.current.start, data.periods.current.end])} data={data} onApply={q => {setPeriodQuery(q); setRetry(v => v + 1);}}/>}
     </section>}
-    {error ? <div className="error-banner" role="alert">{error} <button className="text-link" onClick={() => {setFailure(null); setRetry(v => v + 1);}}>Reintentar</button> <button className="text-link" onClick={() => {selectSegment(''); setPeriodQuery({}); setFailure(null); setRetry(v => v + 1);}}>Restablecer comparación</button></div>
+    {error ? <div className="error-banner" role="alert">{error} <button className="text-link" onClick={() => {setFailure(null); setRetry(v => v + 1);}}>Reintentar</button> <button className="text-link" onClick={() => {selectSegment(''); selectProduct({}); setPeriodQuery({}); setFailure(null); setRetry(v => v + 1);}}>Restablecer comparación</button></div>
       : !current ? <p className="commercial-notice" role="status">Cargando la comparación de volumen…</p>
       : !current.periods ? <Empty title="Todavía no hay datos Commercial" text="Cargá el CSV en la pestaña Dispersión para empezar a comparar el consumo."/>
       : <><PeriodCoverage periods={current.periods}/>
-        {current.segment ? <ClientBreakdown data={current}/> : <SegmentOverview data={current} onSelect={selectSegment}/>}
-        <p className="volume-method">El volumen sigue la columna Volume y el criterio de los totales por canal del archivo Commercial. Incluye devoluciones y ajustes. Cada segmento se compara consigo mismo. El filtro de producto permite comparar una sola referencia en su unidad original.</p>
+        {current.segment ? <ClientBreakdown data={current} onFamily={selectFamily}/> : <><FamilyOverview data={current} onSelect={selectFamily}/><SegmentOverview data={current} onSelect={selectSegment}/></>}
+        <p className="volume-method">El volumen sigue la columna Volume y el criterio de los totales por canal del archivo Commercial. Incluye devoluciones y ajustes. Cada segmento se compara consigo mismo. Podés comparar los códigos de un mismo grupo de combustible o consultar un producto individual.</p>
       </>}
   </div>;
 }

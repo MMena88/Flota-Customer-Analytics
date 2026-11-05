@@ -1,4 +1,5 @@
 import {commercialIdentity, matchCustomers, type CommercialRow} from './commercial';
+import {familyIds, fuelFamilies, fuelFamilyOf, isFuelFamily, type FuelFamily} from './commercial-products';
 import {validDate} from './domain';
 import {calendarPeriod, rangeDays, shiftDay, type DateRange} from './fleet-growth-domain';
 
@@ -14,6 +15,7 @@ export type ComparisonQuery = {
   currentEnd?: string;
   segment?: string;
   product?: string;
+  family?: string;
 };
 export class ComparisonInputError extends Error {}
 
@@ -100,6 +102,13 @@ function change(pair: Pair, comparable: boolean) {
 type ClientPair = Pair & {id: string; name: string; codes: Set<string>; identified: boolean};
 
 export function compareCommercialVolume(rows: CommercialRow[], paymentNames: string[], confirmedNames: string[], q: ComparisonQuery = {}) {
+  const family = q.family;
+  if (family !== undefined && (!isFuelFamily(family) || q.product !== undefined)) {
+    throw new ComparisonInputError('Elegí un grupo de combustible válido o un producto individual.');
+  }
+  const catalog = [...new Set(rows.map(row => row.product))].sort();
+  const mapped = new Map(catalog.map(product => [product, fuelFamilyOf(product)]));
+  if (q.product !== undefined && !mapped.has(q.product)) throw new ComparisonInputError('El producto seleccionado ya no está en Commercial.');
   const reportDays = new Set(rows.map(row => row.date));
   const dates = [...reportDays].sort();
   const bounds = {first: dates[0] || '', last: dates.at(-1) || ''};
@@ -111,6 +120,7 @@ export function compareCommercialVolume(rows: CommercialRow[], paymentNames: str
   const segments = new Map<string, Pair>();
   const clients = new Map<string, ClientPair>();
   const products = new Set<string>();
+  const fuelTotals = new Map<FuelFamily, Pair>();
 
   for (const row of rows) {
     // Retain the full source segment list, including channels reclassified to Payment24.
@@ -119,11 +129,20 @@ export function compareCommercialVolume(rows: CommercialRow[], paymentNames: str
     let segment = segments.get(identity.segment);
     if (!segment) { segment = emptyPair(); segments.set(identity.segment, segment); }
     const selected = q.segment === identity.segment;
-    if (selected) products.add(row.product);
-    if (!periods || (q.product !== undefined && row.product !== q.product)) continue;
+    const inScope = !q.segment || selected;
+    if (inScope) products.add(row.product);
+    const rowFamily = mapped.get(row.product);
+    if ((family && rowFamily !== family) || (q.product !== undefined && row.product !== q.product)) continue;
+    let group: Pair | undefined;
+    if (rowFamily && inScope && q.product === undefined) {
+      group = fuelTotals.get(rowFamily);
+      if (!group) {group = emptyPair(); fuelTotals.set(rowFamily, group);}
+    }
+    if (!periods) continue;
     const side = inPeriod(row.date, periods.base) ? 'base' : inPeriod(row.date, periods.current) ? 'current' : null;
     if (!side) continue;
     add(segment, side, row.volume);
+    if (group) add(group, side, row.volume);
     if (!selected) continue;
 
     let client = clients.get(identity.customerId);
@@ -135,11 +154,14 @@ export function compareCommercialVolume(rows: CommercialRow[], paymentNames: str
     add(client, side, row.volume);
   }
   if (rows.length && q.segment && !segments.has(q.segment)) throw new ComparisonInputError('El segmento seleccionado ya no está en Commercial.');
-  if (q.product !== undefined && !products.has(q.product)) throw new ComparisonInputError('El producto seleccionado no está en este segmento.');
 
   const segmentBase = segments.get(q.segment || '')?.base ?? 0;
   return {
-    bounds, periods, comparable, segment: q.segment || '', product: q.product ?? null,
+    bounds, periods, comparable, segment: q.segment || '', product: q.product ?? null, family: family ?? null, catalog,
+    fuelSummary: familyIds.filter(id => fuelTotals.has(id)).map(id => {
+      const pair = fuelTotals.get(id)!;
+      return {id, name: fuelFamilies[id].label, ...pair, ...change(pair, comparable)};
+    }),
     products: [...products].sort(), months: [...new Set(dates.map(day => day.slice(0, 7)))],
     segments: [...segments].sort(([a], [b]) => a.localeCompare(b)).map(([name, pair]) => ({name, ...pair, ...change(pair, comparable)})),
     clients: [...clients.values()].map(client => {

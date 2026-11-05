@@ -4,6 +4,7 @@ import {storageAdmin} from '@/lib/storage';
 import {storageBucket} from '@/lib/supabase/config';
 import {parseCommercial,mergeCommercial,summarizeCommercial,matchCustomers,customerKey,type CommercialData} from '@/lib/commercial';
 import {compareCommercialVolume,ComparisonInputError} from '@/lib/commercial-comparison';
+import {isFuelFamily} from '@/lib/commercial-products';
 export const runtime='nodejs';export const maxDuration=120;
 const key='commercial/current.json';
 async function load():Promise<CommercialData>{const {data,error}=await storageAdmin().download(key);if(error){if(String((error as {statusCode?:string}).statusCode)==='404'||String((error as {statusCode?:string}).statusCode)==='400'&&error.message.toLowerCase().includes('not found'))return {rows:[],updatedAt:'',source:'',paymentNames:[],history:[]};throw new Error('No se pudo leer la base de rentabilidad.')}return JSON.parse(await data!.text())}
@@ -12,8 +13,23 @@ export const GET=withApi(async(req)=>{const [data,accounts]=await Promise.all([l
   try{return json(compareCommercialVolume(data.rows,names,data.confirmedNames||[],Object.fromEntries(p)));}
   catch(error){if(error instanceof ComparisonInputError)return json({error:error.message},400);throw error;}
  }
- const metric=p.get('metric')==='productMargin'?'productMargin':'grossMargin';const filters={confirmedNames:data.confirmedNames||[],start:p.get('start')||'',end:p.get('end')||'',segment:p.get('segment')||'',product:p.get('product')||'',search:p.get('search')||''};
- const result=summarizeCommercial(data.rows,names,metric,filters),full=summarizeCommercial(data.rows,names,metric,{confirmedNames:data.confirmedNames||[]});const dates=data.rows.map(r=>r.date).sort();const matches=matchCustomers(data.rows,names);const pending=[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!data.confirmedNames?.includes(k)).map(([k,v])=>({key:k,name:data.rows.find(r=>customerKey(r.name)===k)?.name||k,codes:[...v]}));return json({...result,pending,segments:[...new Set([...data.rows.map(x=>x.segment),...full.points.map(x=>x.segment)])].sort(),sourceSegments:[...new Set(data.rows.map(x=>x.segment))].sort(),products:[...new Set(data.rows.map(r=>r.product).filter(Boolean))].sort(),bounds:{first:dates[0]||'',last:dates.at(-1)||''},updatedAt:data.updatedAt,source:data.source,history:data.history,totalRows:data.rows.length});});
+ const family=p.get('family');
+ // The legacy empty product parameter means all products. An explicit sku can select a blank source reference.
+ const product=p.get('sku')??(p.get('product')||undefined);
+ if(family!==null&&(!isFuelFamily(family)||product!==undefined))return json({error:'Elegí un grupo de combustible válido o un producto individual.'},400);
+ const metric=p.get('metric')==='productMargin'?'productMargin':'grossMargin';
+ const confirmedNames=data.confirmedNames||[];
+ const filters={confirmedNames,start:p.get('start')||'',end:p.get('end')||'',segment:p.get('segment')||'',product,family:family??undefined,groupFuels:p.get('groupFuels')==='1',search:p.get('search')||''};
+ const result=summarizeCommercial(data.rows,names,metric,filters),full=summarizeCommercial(data.rows,names,metric,{confirmedNames});
+ const dates=data.rows.map(r=>r.date).sort(),matches=matchCustomers(data.rows,names);
+ const pending=[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!confirmedNames.includes(k))
+  .map(([k,v])=>({key:k,name:data.rows.find(r=>customerKey(r.name)===k)?.name||k,codes:[...v]}));
+ const catalog=[...new Set(data.rows.map(r=>r.product))].sort();
+ const scopeProducts=filters.segment?[...new Set(full.points.filter(r=>r.segment===filters.segment).map(r=>r.product))].sort():catalog;
+ return json({...result,pending,segments:[...new Set([...data.rows.map(x=>x.segment),...full.points.map(x=>x.segment)])].sort(),
+  sourceSegments:[...new Set(data.rows.map(x=>x.segment))].sort(),products:catalog.filter(Boolean),scopeProducts,
+  bounds:{first:dates[0]||'',last:dates.at(-1)||''},updatedAt:data.updatedAt,source:data.source,history:data.history,totalRows:data.rows.length});
+});
 export const POST=withApi(async(req,member)=>{try{const b=await body(req);
  if(b.action==='prepare'){if(!Number.isInteger(b.size)||b.size<1||b.size>30*1024*1024||typeof b.name!=='string'||!b.name.toLowerCase().endsWith('.csv'))throw new Error('Seleccioná un CSV Commercial de hasta 30 MB.');const path=`commercial/uploads/${member.id}/${crypto.randomUUID()}.csv`;const {data,error}=await storageAdmin().createSignedUploadUrl(path);if(error||!data)throw new Error('No se pudo preparar el archivo.');return json({path,token:data.token,bucket:storageBucket});}
  const current=await load();

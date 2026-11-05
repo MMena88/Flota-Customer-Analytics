@@ -1,3 +1,5 @@
+import {fuelFamilies, fuelFamilyOf, type FuelFamily} from './commercial-products';
+
 export type CommercialRow={date:string;segment:string;code:string;name:string;product:string;volume:number;sales:number;cost:number;productMargin:number;variableCost:number;grossMargin:number};
 export type CommercialData={rows:CommercialRow[];updatedAt:string;source:string;paymentNames:string[];confirmedNames?:string[];history:{at:string;source:string;rows:number;from:string;to:string}[]};
 export const customerKey=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -35,15 +37,28 @@ export function commercialIdentity(row:CommercialRow,matches:ReturnType<typeof m
  const customerId=identified?(payment?'payment:'+nameKey:code?'code:'+code:'name:'+nameKey):'unassigned';
  return {identified,payment,customerId,segment:payment?'B2B · Payment24':row.segment};
 }
-export type CommercialPoint={key:string;customerId:string;name:string;code:string;segment:string;product:string;identified:boolean;sourceSegments:string[];volume:number;sales:number;cost:number;margin:number;unitMargin:number|null;payment:boolean};
-export function summarizeCommercial(rows:CommercialRow[],names:string[],metric:'grossMargin'|'productMargin',filter:{start?:string;end?:string;segment?:string;product?:string;search?:string;confirmedNames?:string[]}={}){
+export type CommercialPoint={key:string;customerId:string;name:string;code:string;segment:string;product:string;sourceProducts?:string[];identified:boolean;sourceSegments:string[];volume:number;sales:number;cost:number;margin:number;unitMargin:number|null;payment:boolean};
+export function summarizeCommercial(rows:CommercialRow[],names:string[],metric:'grossMargin'|'productMargin',filter:{start?:string;end?:string;segment?:string;product?:string;family?:FuelFamily;groupFuels?:boolean;search?:string;confirmedNames?:string[]}={}){
  const matches=matchCustomers(rows,names),confirmed=new Set(filter.confirmedNames),map=new Map<string,CommercialPoint>();let adjustments=0,unidentified=0;
- for(const r of rows){if(filter.start&&r.date<filter.start||filter.end&&r.date>filter.end||filter.product&&r.product!==filter.product)continue;
+ for(const r of rows){if(filter.start&&r.date<filter.start||filter.end&&r.date>filter.end||filter.product!==undefined&&r.product!==filter.product)continue;
+ const family=(filter.family||filter.groupFuels)?fuelFamilyOf(r.product):null;
+ if(filter.family&&family!==filter.family)continue;
  const {identified,payment,customerId,segment}=commercialIdentity(r,matches,confirmed);
  if(filter.segment&&segment!==filter.segment||filter.search&&!customerKey(r.name+' '+r.code).includes(customerKey(filter.search)))continue;
  if(!identified)unidentified++;if(r.volume===0&&r[metric]!==0)adjustments++;
- // Keep products separate: Commercial does not supply a common volume unit.
- // Include unnamed accounting rows in totals and tables, never as invented customers.
- const key=JSON.stringify([customerId,segment,r.product]);let p=map.get(key);if(!p){p={key,customerId,name:identified?r.name:'Sin cliente informado',code:r.code==='NONE'?'':r.code,segment,product:r.product,identified,sourceSegments:[],volume:0,sales:0,cost:0,margin:0,unitMargin:null,payment};map.set(key,p)}if(payment&&r.code&&!p.code.split(', ').includes(r.code))p.code+=', '+r.code;if(!p.sourceSegments.includes(r.segment))p.sourceSegments.push(r.segment);p.volume+=r.volume;p.sales+=r.sales;p.cost+=r.cost;p.margin+=r[metric];
- }const points=[...map.values()].map(p=>({...p,unitMargin:p.volume>0?p.margin/p.volume:null})).sort((a,b)=>b.volume-a.volume);return {points,adjustments,unidentified,ambiguous:[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!filter.confirmedNames?.includes(k)).length};
+ // Only combine explicitly mapped fuel grades. All other products keep their original unit and code.
+ const group=filter.groupFuels&&filter.product===undefined?family:null;
+ const key=JSON.stringify(group?[customerId,segment,'family',group]:[customerId,segment,r.product]);
+ let p=map.get(key);
+ if(!p){
+  p={key,customerId,name:identified?r.name:'Sin cliente informado',code:r.code==='NONE'?'':r.code,segment,
+   product:group?'Grupo · '+fuelFamilies[group].label:r.product,...(group?{sourceProducts:[]}:{}),
+   identified,sourceSegments:[],volume:0,sales:0,cost:0,margin:0,unitMargin:null,payment};
+  map.set(key,p);
+ }
+ if(p.sourceProducts&&!p.sourceProducts.includes(r.product))p.sourceProducts.push(r.product);
+ if(payment&&r.code&&r.code!=='NONE'&&!p.code.split(', ').includes(r.code))p.code=[p.code,r.code].filter(Boolean).join(', ');
+ if(!p.sourceSegments.includes(r.segment))p.sourceSegments.push(r.segment);
+ p.volume+=r.volume;p.sales+=r.sales;p.cost+=r.cost;p.margin+=r[metric];
+ }const points=[...map.values()].map(p=>({...p,...(p.sourceProducts?{sourceProducts:p.sourceProducts.sort()}:{}),unitMargin:p.volume>0?p.margin/p.volume:null})).sort((a,b)=>b.volume-a.volume);return {points,adjustments,unidentified,ambiguous:[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!filter.confirmedNames?.includes(k)).length};
 }
