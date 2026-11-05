@@ -3,10 +3,15 @@ import {all,body,json} from '@/lib/server';
 import {storageAdmin} from '@/lib/storage';
 import {storageBucket} from '@/lib/supabase/config';
 import {parseCommercial,mergeCommercial,summarizeCommercial,matchCustomers,customerKey,type CommercialData} from '@/lib/commercial';
+import {compareCommercialVolume,ComparisonInputError} from '@/lib/commercial-comparison';
 export const runtime='nodejs';export const maxDuration=120;
 const key='commercial/current.json';
 async function load():Promise<CommercialData>{const {data,error}=await storageAdmin().download(key);if(error){if(String((error as {statusCode?:string}).statusCode)==='404'||String((error as {statusCode?:string}).statusCode)==='400'&&error.message.toLowerCase().includes('not found'))return {rows:[],updatedAt:'',source:'',paymentNames:[],history:[]};throw new Error('No se pudo leer la base de rentabilidad.')}return JSON.parse(await data!.text())}
-export const GET=withApi(async(req)=>{const data=await load();const accounts=await all<{source_name:string}>('SELECT source_name FROM fleet_accounts');const names=[...data.paymentNames,...accounts.map(a=>a.source_name)],p=new URL(req.url).searchParams;
+export const GET=withApi(async(req)=>{const [data,accounts]=await Promise.all([load(),all<{source_name:string}>('SELECT source_name FROM fleet_accounts')]);const names=[...data.paymentNames,...accounts.map(a=>a.source_name)],p=new URL(req.url).searchParams;
+ if(p.get('view')==='volume-comparison'){
+  try{return json(compareCommercialVolume(data.rows,names,data.confirmedNames||[],Object.fromEntries(p)));}
+  catch(error){if(error instanceof ComparisonInputError)return json({error:error.message},400);throw error;}
+ }
  const metric=p.get('metric')==='productMargin'?'productMargin':'grossMargin';const filters={confirmedNames:data.confirmedNames||[],start:p.get('start')||'',end:p.get('end')||'',segment:p.get('segment')||'',product:p.get('product')||'',search:p.get('search')||''};
  const result=summarizeCommercial(data.rows,names,metric,filters),full=summarizeCommercial(data.rows,names,metric,{confirmedNames:data.confirmedNames||[]});const dates=data.rows.map(r=>r.date).sort();const matches=matchCustomers(data.rows,names);const pending=[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!data.confirmedNames?.includes(k)).map(([k,v])=>({key:k,name:data.rows.find(r=>customerKey(r.name)===k)?.name||k,codes:[...v]}));return json({...result,pending,segments:[...new Set([...data.rows.map(x=>x.segment),...full.points.map(x=>x.segment)])].sort(),sourceSegments:[...new Set(data.rows.map(x=>x.segment))].sort(),products:[...new Set(data.rows.map(r=>r.product).filter(Boolean))].sort(),bounds:{first:dates[0]||'',last:dates.at(-1)||''},updatedAt:data.updatedAt,source:data.source,history:data.history,totalRows:data.rows.length});});
 export const POST=withApi(async(req,member)=>{try{const b=await body(req);
