@@ -242,7 +242,7 @@ export function CommercialComparisonView({segment, selection, selectSegment, sel
     </section>}
     {error ? <div className="error-banner" role="alert">{error} <button className="text-link" onClick={() => {setFailure(null); setRetry(v => v + 1);}}>Reintentar</button> <button className="text-link" onClick={() => {selectSegment(''); selectProduct({}); setPeriodQuery({}); setFailure(null); setRetry(v => v + 1);}}>Restablecer comparación</button></div>
       : !current ? <p className="commercial-notice" role="status">Cargando la comparación de volumen…</p>
-      : !current.periods ? <Empty title="Todavía no hay datos Commercial" text="Cargá el CSV en la pestaña Dispersión para empezar a comparar el consumo."/>
+      : !current.periods ? <Empty title="Todavía no hay datos Commercial" text="Elegí Cargar CSV Commercial y subí el archivo de detalle."/>
       : <><PeriodCoverage periods={current.periods}/>
         {current.segment ? <ClientBreakdown data={current} onFamily={selectFamily}/> : <><FamilyOverview data={current} onSelect={selectFamily}/><SegmentOverview data={current} onSelect={selectSegment}/></>}
         <p className="volume-method">El volumen sigue la columna Volume y el criterio de los totales por canal del archivo Commercial. Incluye devoluciones y ajustes. Cada segmento se compara consigo mismo. Podés comparar los códigos de un mismo grupo de combustible o consultar un producto individual.</p>

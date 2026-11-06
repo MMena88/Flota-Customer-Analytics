@@ -1,0 +1,14 @@
+.commercial-upload-body { display: grid; justify-items: start; gap: 15px; padding: 18px 24px 22px; }
+.commercial-upload-body p { margin: 0; color: #486052; font-size: 14px; line-height: 1.65; }
+.commercial-upload-status { width: 100%; padding: 11px 14px; border-radius: 7px; background: #eef5ef; }
+.commercial-upload-status strong { margin-right: 7px; }
+.commercial-file-choice, .commercial-update-mode { display: grid; gap: 8px; width: min(100%, 540px); color: #274e37; font-size: 14px; font-weight: 650; }
+.commercial-file-choice input { max-width: 100%; font-size: 13px; font-weight: 400; }
+.commercial-file-choice input::file-selector-button { padding: 8px 12px; margin-right: 10px; border-radius: 6px; border: 1px solid #afc6b7; background: #f5f9f5; color: #215638; cursor: pointer; }
+.commercial-file-choice small { font-weight: 400; color: #3c5948; }
+.commercial-update-mode select { font-size: 13px; font-weight: 400; }
+.commercial-upload-preview { width: 100%; display: grid; gap: 9px; justify-items: start; border-left: 3px solid #409364; background: #f1f7f2; padding: 13px 17px; }
+.commercial-repair { border-color: #dac89f; }
+.commercial-upload .table-scroll small { display: block; color: #587060; }
+.upload-tabs.commercial-upload-tabs { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
+@media (max-width: 800px) { .upload-tabs.commercial-upload-tabs { grid-template-columns: 1fr; } .commercial-upload-body { padding: 15px; } }
