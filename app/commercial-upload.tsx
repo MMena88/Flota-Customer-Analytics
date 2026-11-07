@@ -110,7 +110,7 @@ export function CommercialUpload({openCommercial}:{openCommercial:()=>void}){
         <button className="button secondary" onClick={openCommercial} disabled={busy}>Ver análisis <ArrowRight size={15}/></button></div>
       {status?<div className="commercial-upload-body">
         <p className="commercial-upload-status"><strong>Histórico activo</strong> {status.totalRows?date(status.first)+' – '+date(status.last)+' · '+number(status.totalRows)+' filas':'Aún no hay registros'}</p>
-        {status.canEdit?<><p>Exportá <b>Commercial All Values</b> como CSV con segmento, día, mes, código de cliente (opcional), nombre del cliente y producto. Usá la misma unidad de volumen que el histórico.</p>
+        {status.canEdit?<><p>Exportá <b>Commercial All Values</b> como CSV con segmento, día, mes, código de cliente (opcional), nombre del cliente y producto. Exportá Volume en galones estadounidenses para todos los productos. El panel permite verlos también en m³.</p>
           <FileChoice label="Seleccionar CSV de Commercial" chosen={detail} busy={busy} onFile={f=>choose(f,'detail')}/>
           {detail&&<><label className="commercial-update-mode">Tipo de actualización<select value={mode} disabled={busy} onChange={e=>{setMode(e.target.value as UpdateMode);setPlan(null);}}>
             <option value="rows">Actualizar solo las filas del archivo</option><option value="scopes">Reemplazar días y segmentos completos</option></select></label>

@@ -33,3 +33,11 @@
 .fleet-mode-tabs{margin-top:12px;margin-bottom:24px;gap:28px}.fleet-mode-tabs button{display:flex;align-items:center;gap:7px;font-size:14px}.fleet-growth .page-heading h2{font-size:26px;letter-spacing:-.6px;color:#244a38}.fleet-growth .growth-filters{grid-template-columns:1.4fr 1fr .7fr}.fleet-growth .growth-client-select{grid-column:span 2}.growth-date-grid fieldset:disabled{opacity:.55}@media(max-width:700px){.fleet-growth .growth-filters{grid-template-columns:1fr 1fr}.fleet-growth .growth-client-select{grid-column:1/-1}}@media(max-width:500px){.fleet-growth .growth-filters{grid-template-columns:1fr}.fleet-growth .growth-client-select{grid-column:auto}.fleet-mode-tabs{gap:20px}.fleet-mode-tabs button{font-size:13px}}
 
 .fleet-tm-filter{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#496453}.fleet-tm-filter select{min-width:210px;max-width:290px}.fleet-growth .growth-filters{grid-template-columns:1.25fr 1.25fr 1fr .75fr}.fleet-growth .growth-client-select{grid-column:span 3}.fleet-growth .growth-filters .text-link{justify-self:end;align-self:end;margin-bottom:12px}@media(max-width:1100px){.fleet-growth .growth-filters{grid-template-columns:1fr 1fr}.fleet-growth .growth-client-select{grid-column:1/-1}}@media(max-width:500px){.fleet-tm-filter{width:100%}.fleet-tm-filter select{flex:1;max-width:none;min-width:0}.fleet-growth .growth-filters{grid-template-columns:1fr}.fleet-growth .growth-client-select{grid-column:auto}}
+
+.analytics-view-bar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.analytics-view-bar .fleet-mode-tabs{margin-bottom:0}
+.volume-unit-select{display:inline-flex;flex-direction:column;align-items:flex-start;gap:4px;font-size:.8rem;font-weight:600;color:#3b5146}
+.volume-unit-select select{min-height:36px;padding:4px 12px;border:1px solid #c8d7cd;border-radius:7px;color:#184b38;background:white;font:inherit}
+.customer-audit-table{overflow:auto;max-height:300px;margin-top:12px}
+.customer-audit-table th{position:sticky;top:0;background:#f3f7f3}
+@media(max-width:600px){.analytics-view-bar{gap:8px}.volume-unit-select select{min-height:40px}}

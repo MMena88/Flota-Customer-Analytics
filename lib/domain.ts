@@ -6,7 +6,7 @@ export type Market={id:string;segment:string;product:string;unit:string;start:st
 export type ImportLog={id:string;kind:string;source:string;created:number;updated:number;unchanged:number;created_at:string};
 export type Chat={id:string;client_id:string|null;question:string;answer:string;context:string;created_at:string};
 export type Workspace={clients:Client[];records:Daily[];activities:Activity[];documents:Doc[];markets:Market[];imports:ImportLog[];chats:Chat[];aiReady:boolean;period:{start:string;end:string;previousStart:string;previousEnd:string};loadedAt:string};
-export const units=['gal','L','bbl','kg','t'];
+export const units=['gal','m³','L','bbl','kg','t'];
 export function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guatemala',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
 export function validDate(v:string){return /^\d{4}-\d{2}-\d{2}$/.test(v)&&!isNaN(Date.parse(v))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;}
 export function priorPeriod(start:string,end:string){const n=Math.round((Date.parse(end)-Date.parse(start))/86400000)+1;return {previousStart:new Date(Date.parse(start)-n*86400000).toISOString().slice(0,10),previousEnd:new Date(Date.parse(start)-86400000).toISOString().slice(0,10)};}

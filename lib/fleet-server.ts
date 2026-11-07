@@ -1,3 +1,4 @@
+import {groupProducts} from './commercial-products';
 import {all,db,insert,cleanClient,fingerprint,now} from './server';
 import type {Statement} from './database';
 import {fleetTmOptions,matchesFleetTm,UNASSIGNED_TM} from './fleet-tm';
@@ -26,13 +27,20 @@ export async function importFleetBatch(job:FleetImport,offset:number,input:unkno
  for(let i=0;i<rows.length;i++){const r=rows[i],before=existing.get(r.transaction_id);if(before?.content_hash===hashes[i]){unchanged++;continue;}if(before)changed++;else inserted++;statements.push(insert('fleet_transactions',{version_id:job.id+':'+r.transaction_id,import_id:job.id,content_hash:hashes[i],...r}));}
  const batch={id:job.id+':'+offset,import_id:job.id,offset,content_hash:hash,rows:rows.length,inserted,changed,unchanged};statements.push(insert('fleet_batches',batch));statements.push(db().prepare('UPDATE fleet_imports SET processed=processed+?,inserted=inserted+?,changed=changed+?,unchanged=unchanged+? WHERE id=? AND status=? AND processed=?').bind(rows.length,inserted,changed,unchanged,job.id,'loading',offset));await db().batch(statements);return {...batch,processed:offset+rows.length,replayed:false};
 }
-export function fleetFilters(p:URLSearchParams,start:string,end:string){const clauses=['t.date>=?','t.date<=?'],args:(string|number)[]=[start,end];for(const [param,column]of [['client','a.client_id'],['account','t.account'],['product','t.product'],['merchant','t.merchant']] as const){const v=p.get(param);if(v){clauses.push(`${column}=?`);args.push(v==='__missing__'?'':v);}}const tm=(p.get('tm')||'').trim();if(tm){clauses.push("EXISTS (SELECT 1 FROM clients tc WHERE tc.id=a.client_id AND TRIM(COALESCE(tc.owner,''))=?)");args.push(tm===UNASSIGNED_TM?'':tm);}return {where:clauses.join(' AND '),args};}
+export function fleetFilters(p:URLSearchParams,start:string,end:string,products:{product:string}[]=[]){const clauses=['t.date>=?','t.date<=?'],args:(string|number)[]=[start,end];for(const [param,column]of [['client','a.client_id'],['account','t.account'],['product','t.product'],['merchant','t.merchant']] as const){const v=p.get(param);if(v){clauses.push(`${column}=?`);args.push(v==='__missing__'?'':v);}}const family=p.get('family');
+ if(family){
+  if(p.get('product'))throw new Error('Elegí un grupo o un producto de flota.');
+  const members=groupProducts(products.map(p=>p.product)).members.get(family) || [];
+  if(members.length){clauses.push('t.product IN ('+members.map(()=>'?').join(',')+')');args.push(...members);}
+  else clauses.push('1=0');
+ }
+ const tm=(p.get('tm')||'').trim();if(tm){clauses.push("EXISTS (SELECT 1 FROM clients tc WHERE tc.id=a.client_id AND TRIM(COALESCE(tc.owner,''))=?)");args.push(tm===UNASSIGNED_TM?'':tm);}return {where:clauses.join(' AND '),args};}
 export async function fleetOverview(p:URLSearchParams){
  const [bounds,accounts,products,imports]=await Promise.all([db().prepare('SELECT MIN(date) AS first,MAX(date) AS last,COUNT(*) AS rows FROM fleet_current').first<{first:string|null;last:string|null;rows:number}>(),all<{account:string;client_id:string;source_name:string;name:string;segment:string;owner:string;strategic:number}>('SELECT a.*,c.name,c.segment,c.owner,c.strategic FROM fleet_accounts a JOIN clients c ON c.id=a.client_id WHERE EXISTS (SELECT 1 FROM fleet_current ft WHERE ft.account=a.account) ORDER BY c.name'),all<{product:string}>('SELECT DISTINCT product FROM fleet_current ORDER BY product'),all<FleetImport>('SELECT * FROM fleet_imports ORDER BY sequence DESC LIMIT 30')]);
  const tm=(p.get('tm')||'').trim(),tms=fleetTmOptions(accounts);
  if(!bounds?.last)return {empty:true,bounds,imports,accounts,tms,products:products.map(x=>x.product)};
  const start=p.get('start')||bounds.first!,end=p.get('end')||bounds.last;if(!validDate(start)||!validDate(end)||start>end)throw new Error('Revisá el período.');const asOf=end<bounds.last?end:bounds.last,previous=priorPeriod(start,end),compareCovered=!!bounds.first&&previous.previousStart>=bounds.first&&end<=bounds.last;
- const f=fleetFilters(p,start,end),pf=fleetFilters(p,previous.previousStart,previous.previousEnd),from='FROM fleet_current t JOIN fleet_accounts a ON a.account=t.account';
+ const f=fleetFilters(p,start,end,products),pf=fleetFilters(p,previous.previousStart,previous.previousEnd,products),from='FROM fleet_current t JOIN fleet_accounts a ON a.account=t.account';
  const [total,customerStats,priorStats,monthly,daily,productStats,stationStats,statuses,accountStats]=await Promise.all([
   db().prepare(`SELECT ${measures} ${from} WHERE ${f.where}`).bind(...f.args).first<FleetStats>(),
   all<FleetStats&{client_id:string}>(`SELECT a.client_id,${measures} ${from} WHERE ${f.where} GROUP BY a.client_id`,...f.args),

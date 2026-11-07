@@ -97,6 +97,15 @@ job=await start('1',1);await batch(job,0,[{...row,transaction_id:'new-account-sa
 const retained=(await call('fleet',undefined,'?tm=TM%20Sur')).data;assert.equal(retained.clients[0].owner,'TM Sur');assert.equal(retained.clients[0].accounts.length,3);assert.equal(retained.tms.find(t=>t.value==='TM Sur').clients,1);
 assert.equal((await call('fleet',undefined,'?tm=TM%20Sur','viewer')).status,200);
 ok(true,'TM filters reconcile panel, growth, transactions, dates and fuel; unassigned clients remain visible, multi-account clients count once, assignments persist across Payment24 imports');
+const fleetFamilyRows=[{...row,transaction_id:'family-puma',product:'Ion Diesel',volume_milli:10000},{...row,transaction_id:'family-shell',product:'Shell FuelSave Diesel',volume_milli:5000}];
+const familyJob=await start('7',2);await batch(familyJob,0,fleetFamilyRows);await finish(familyJob);
+const grouped=(await call('fleet',undefined,'?family=diesel')).data;
+const events=(await call('fleet/transactions',undefined,'?family=diesel')).data;
+const groupedGrowth=(await call('fleet',undefined,'?view=growth&family=diesel')).data;
+const bySku=await Promise.all(['Diesel','Ion Diesel','Shell FuelSave Diesel'].map(p=>call('fleet',undefined,'?product='+encodeURIComponent(p))));
+assert.equal(grouped.total.volume,bySku.reduce((s,r)=>s+r.data.total.volume,0));
+assert.equal(grouped.total.events,events.total);assert.equal(sumGrowth(groupedGrowth,'volume'),grouped.total.volume);
+ok(true,'One diesel family reconciles Payment24 overview, growth and transaction drilldown across both brands');
 
 if(process.argv[2]){
  await clear();const file=await fs.readFile(process.argv[2]),parsed=await parser.readPaymentXlsx(new Blob([file]));ok(parsed.rows.length>0&&parsed.errors.length===0,'Full Payment24 XLSX parses without dropping rows');ok(parsed.duplicates===0,'File IDs and independent decimal control totals reconcile');

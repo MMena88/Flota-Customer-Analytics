@@ -32,7 +32,7 @@ export async function planImport(kind:string,rows:Record<string,string>[]){
    const code=after.code;if(code&&clients.some(c=>c.id!==after.id&&norm(c.code)===norm(code)))throw new Error('El código pertenece a otro cliente.');
   }else{
    const matches=clients.filter(c=>r.codigo?norm(c.code)===norm(r.codigo):norm(c.name)===norm(r.nombre));if(matches.length!==1)throw new Error(matches.length?'Cliente ambiguo; usá el código.':'Cliente no encontrado. Primero cargá su ficha.');
-   if(!validDate(r.fecha))throw new Error('Fecha inválida; usá AAAA-MM-DD.');const product=str(r.producto),unit=str(r.unidad);if(!product)throw new Error('Falta producto.');if(!units.includes(unit))throw new Error('Unidad: gal, L, bbl, kg o t.');
+   if(!validDate(r.fecha))throw new Error('Fecha inválida; usá AAAA-MM-DD.');const product=str(r.producto),unit=str(r.unidad).replace(/^m3$/i,'m³');if(!product)throw new Error('Falta producto.');if(!units.includes(unit))throw new Error('Unidad: gal, m³, L, bbl, kg o t.');
    after={id:crypto.randomUUID(),client_id:matches[0].id,date:r.fecha,product:norm(product),unit,location:norm(str(r.sucursal)),volume:num(r.volumen,'Volumen',true)!,revenue:num(r.ingreso,'Ingreso'),cost:num(r.costo,'Costo'),source:str(r.fuente),updated_at:now()};
    const key=recordKey(after);if(seen.has(key))throw new Error('Se repite cliente, fecha, producto, unidad y sucursal. Consolidá esa fila.');seen.add(key);before=map.get(key)||null;if(before)after.id=before.id;label=matches[0].name+' · '+r.fecha+' · '+product;
   }

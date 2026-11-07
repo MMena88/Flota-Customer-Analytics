@@ -5,7 +5,7 @@ import {storageBucket} from '@/lib/supabase/config';
 import {readCommercialReport,missingProductMessage,summarizeCommercial,matchCustomers,customerKey,type CommercialData,type CommercialHistory} from '@/lib/commercial';
 import {commercialImportStatus,planCommercialRepair,planCommercialUpdate} from '@/lib/commercial-import';
 import {compareCommercialVolume,ComparisonInputError} from '@/lib/commercial-comparison';
-import {isFuelFamily} from '@/lib/commercial-products';
+import {groupProducts,isFuelFamily} from '@/lib/commercial-products';
 export const runtime='nodejs';export const maxDuration=120;
 const key='commercial/current.json';
 async function load():Promise<CommercialData>{const {data,error}=await storageAdmin().download(key,{cacheNonce:crypto.randomUUID()});if(error){if(String((error as {statusCode?:string}).statusCode)==='404'||String((error as {statusCode?:string}).statusCode)==='400'&&error.message.toLowerCase().includes('not found'))return {rows:[],updatedAt:'',source:'',paymentNames:[],history:[]};throw new Error('No se pudo leer la base de rentabilidad.')}return JSON.parse(await data!.text())}
@@ -21,10 +21,11 @@ export const GET=withApi(async(req,member)=>{
  const family=p.get('family');
  // The legacy empty product parameter means all products. An explicit sku can select a blank source reference.
  const product=p.get('sku')??(p.get('product')||undefined);
- if(family!==null&&(!isFuelFamily(family)||product!==undefined))return json({error:'Elegí un grupo de combustible válido o un producto individual.'},400);
+ if(family!==null&&((!isFuelFamily(family)&&!groupProducts(data.rows.map(r=>r.product)).members.has(family))||product!==undefined))return json({error:'Elegí un grupo de combustible válido o un producto individual.'},400);
  const metric=p.get('metric')==='productMargin'?'productMargin':'grossMargin';
  const confirmedNames=data.confirmedNames||[];
- const filters={confirmedNames,start:p.get('start')||'',end:p.get('end')||'',segment:p.get('segment')||'',product,family:family??undefined,groupFuels:p.get('groupFuels')==='1',search:p.get('search')||''};
+ const customerView=p.get('customerView')==='name'?'name' as const:p.get('customerView')==='account'?'account' as const:undefined;
+ const filters={customerView,confirmedNames,start:p.get('start')||'',end:p.get('end')||'',segment:p.get('segment')||'',product,family:family??undefined,groupFuels:p.get('groupFuels')==='1',search:p.get('search')||''};
  const result=summarizeCommercial(data.rows,names,metric,filters),full=summarizeCommercial(data.rows,names,metric,{confirmedNames});
  const dates=data.rows.map(r=>r.date).sort(),matches=matchCustomers(data.rows,names);
  const pending=[...matches.codes].filter(([k,v])=>matches.payment.has(k)&&v.size>1&&!confirmedNames.includes(k))

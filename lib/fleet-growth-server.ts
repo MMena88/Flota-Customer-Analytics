@@ -15,7 +15,7 @@ export async function fleetGrowth(p:URLSearchParams):Promise<GrowthResult>{
  let daily:FleetGrowthDaily[]=[];
  if(bounds.last){
   const from=[plan.history.start,plan.baseline.start,plan.current.start].sort()[0],to=[plan.history.end,plan.baseline.end,plan.current.end].sort().at(-1)!;
-  const filters=fleetFilters(p,from,to);
+  const filters=fleetFilters(p,from,to,products);
   // Identical eligibility/sign rules and the same corrected, completed-import
   // view as Panel de flota. Do not read Commercial or sum preauthorisations.
   daily=await all<FleetGrowthDaily>(`SELECT a.client_id,t.date,COUNT(*) AS rows,SUM((${sign})*t.volume_milli)/1000.0 AS volume,SUM((${sign})*t.amount_cents)/100.0 AS amount FROM fleet_current t JOIN fleet_accounts a ON a.account=t.account WHERE ${filters.where} AND (${purchase} OR ${refund}) GROUP BY a.client_id,t.date ORDER BY t.date,a.client_id`,...filters.args);

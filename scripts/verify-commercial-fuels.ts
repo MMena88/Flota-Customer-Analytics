@@ -76,3 +76,48 @@ if(process.argv[2]){
   near(all.reduce((n,p)=>n+p.cost,0),rows.reduce((n,r)=>n+r.cost,0));
   console.log('PASS: every source product and both monthly totals reconciled to the report; full portfolio revenue basis and volume preserved.');
 }
+
+// Two accounts under the same customer purchase different brands at different
+// margins. Reconcile both axes, all money and the two-period attribution.
+const {commercialPointInUnit,customerAudit}=await import('../lib/commercial');
+const {comparisonInUnit}=await import('../lib/commercial-comparison');
+const {groupProducts,fleetMix}=await import('../lib/commercial-products');
+const {recordsInUnit,fromGallons}=await import('../lib/volume-units');
+const close=(a:number,b:number)=>assert.ok(Math.abs(a-b)<1e-8,`${a} != ${b}`);
+const shell='44015 - Shell FuelSave Diesel',puma='30015 - DIESEL BAJO AZUFRE';
+const accountRows=[
+  {...row(dateA,puma,100,10,'Transportes, S.A.'),code:'100'},
+  {...row(dateB,shell,300,90,'TRANSPÓRTES S.A.'),code:'200'},
+  {...row(dateB,shell,-20,-2,'Transportes S.A.'),code:'200'},
+  {...row(dateB,shell,0,-3,'Transportes S.A.'),code:'200'},
+  {...row(dateB,shell,9,5,'Transportes del Sur'),code:'201'},
+  {...row(dateB,puma,0,7,'NONE'),code:'NONE'}
+];
+const optionsByName={customerView:'name' as const,groupFuels:true};
+const summary=summarizeCommercial(accountRows,[],'grossMargin',optionsByName).points;
+const audit=customerAudit(summary);
+assert.deepEqual([audit.customers,audit.accounts,audit.shared.length],[2,3,1]);
+assert.deepEqual(audit.shared[0].codes,['100','200']);
+const diesel=summary.find(p=>p.codes.length===2)!;
+assert.equal(diesel.product,'Grupo · Diésel');
+assert.deepEqual(new Set(diesel.sourceProducts),new Set([shell,puma]));
+assert.deepEqual([diesel.margin,diesel.volume,diesel.unitMargin],[95,380,.25]);
+const m3=commercialPointInUnit(diesel,'m³');close(m3.volume,1.43845647792);close(m3.unitMargin!,95/m3.volume);
+assert.deepEqual([m3.sales,m3.cost,m3.margin],[diesel.sales,diesel.cost,diesel.margin]);
+const searchByCode=summarizeCommercial(accountRows,[],'grossMargin',{...optionsByName,search:'100'}).points;
+assert.deepEqual(searchByCode,[diesel]);
+assert.equal(summarizeCommercial(accountRows,[],'grossMargin',{customerView:'account',groupFuels:true}).points.filter(p=>p.identified).length,3);
+assert.equal(commercialPointInUnit(summary.find(r=>!r.identified)!,'m³').unitMargin,null);
+const periodResults=compareCommercialVolume(accountRows,[],[],{...q,segment,customerView:'name',family:'diesel'});
+const periodMetric=comparisonInUnit(periodResults,'m³'),a=periodResults.clients.find(c=>c.codes.length===2)!,b=periodMetric.clients.find(c=>c.id===a.id)!;
+assert.deepEqual([a.base,a.current,a.delta],[100,280,180]);close(b.delta!,fromGallons(180,'m³'));assert.equal(b.pct,a.pct);assert.equal(b.points,a.points);
+const packs=['5000052 - Puma SUPER HD 25W50, 55AG','5000053 - Puma SUPER HD 25W50, 5AG','5000048 - Puma SUPER HD 15W40, 55AG','550047000 - Shell Rimula R5 10W30 Diesel'];
+const groupedPacks=groupProducts(packs);
+assert.equal(groupedPacks.members.size,1);const [packId]=groupedPacks.members.keys();assert.deepEqual(groupedPacks.members.get(packId),packs.slice(0,2));
+const packRows=packs.map((p,i)=>row(i===0?dateA:dateB,p,10,2));
+assert.equal(summarizeCommercial(packRows,[],'grossMargin',{...optionsByName,family:packId}).points[0].volume,20);
+assert.equal(compareCommercialVolume(packRows,[],[],{...q,family:packId,segment}).clients[0].current,10);
+assert.deepEqual(fleetMix([{product:'Diesel',volume:12},{product:'Low Sulphur Diesel 50',volume:-2}],['Diesel','Low Sulphur Diesel 50']),[{value:'group:diesel',label:'Diésel',volume:10}]);
+const mixed=recordsInUnit([{volume:1000,unit:'gal'},{volume:1,unit:'m³'},{volume:1000,unit:'L'},{volume:1,unit:'bbl'},{volume:5,unit:'kg'}],'m³');
+assert.equal(mixed.length,4);close(mixed.reduce((s,r)=>s+r.volume,0),3.785411784+2+.158987294928);
+console.log('PASS: name and account audit, cross-brand customer, signed volumes, weighted USD/m³, returns, comparison percentages, source codes, lube presentations and source units.');

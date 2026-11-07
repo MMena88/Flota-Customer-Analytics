@@ -2,22 +2,26 @@
 import {useEffect,useId,useMemo,useState} from 'react';
 import {ArrowDownRight,ArrowUpRight,ArrowRight,CalendarDays,Download,RefreshCw,Search,TrendingUp,Users} from 'lucide-react';
 import {api,number,money,date,Empty,download} from './ui';
+import {fleetProductOptions,fleetProductQuery,groupLabel} from '@/lib/commercial-products';
+import {fromGallons, type DisplayUnit} from '@/lib/volume-units';
+import {useVolumeDisplay} from './volume-display';
 import {norm as customerKey} from '@/lib/domain';
 import {addTotals,emptyTotals,growthValue,compareGrowth,growthChange,growthStatusLabels,type Cadence,type GrowthMetric,type GrowthResult,type GrowthPeriod,type GrowthTotals} from '@/lib/fleet-growth-domain';
 
-const metrics:Record<GrowthMetric,string>={volume:'Consumo neto · galones',amount:'Ventas · importe USD'};
+const metricNames=(unit:DisplayUnit):Record<GrowthMetric,string>=>({volume:'Consumo neto · '+unit,amount:'Ventas · importe USD'});
 const cadences:Record<Cadence,string>={month:'Mes',quarter:'Trimestre',week:'Semana'};
 const format=(value:number|null,metric:GrowthMetric)=>value===null?'—':metric==='volume'?number(value,3):money(value,2);
 const percent=(v:number|null)=>v===null?'—':`${v>0?'+':''}${number(v,1)}%`;
 const tone=(v:number|null)=>v===null?'neutral':v>0?'up':v<0?'down':'flat';
 const rangeText=(r:{start:string;end:string})=>r.start&&r.end?`${date(r.start)} — ${date(r.end)}`:'Sin datos';
-const productLabel=(p:string)=>!p||p==='__missing__'?'Producto no informado':p;
+const productLabel=(p:string)=>!p||p==='__missing__'?'Producto no informado':p.startsWith('group:')?groupLabel(p.slice(6)):p;
 const blankDates={start:'',end:'',baseStart:'',baseEnd:'',currentStart:'',currentEnd:''};
 type Dates=typeof blankDates;
 const totalOf=(rows:GrowthTotals[])=>rows.reduce((sum,r)=>addTotals(sum,r),emptyTotals());
 const changesFor=(values:(number|null)[],periods:GrowthPeriod[])=>values.map((v,i)=>i===0||periods[i].partial||periods[i-1].partial?null:growthChange(values[i-1],v).pct);
 
 function TrendChart({periods,values,metric,title}:{periods:GrowthPeriod[];values:(number|null)[];metric:GrowthMetric;title:string}){
+ const {unit}=useVolumeDisplay(), metrics=metricNames(unit);
  const fillId=useId().replace(/:/g,''),[active,setActive]=useState<string>(''),[mode,setMode]=useState<'value'|'percent'>('value');
  const index=periods.findIndex(p=>p.key===active),selected=index>=0?index:Math.max(0,values.findLastIndex(v=>v!==null));
  const changes=changesFor(values,periods),valid=values.filter((v):v is number=>v!==null);
@@ -59,17 +63,22 @@ function ChangeChart({periods,changes}:{periods:GrowthPeriod[];changes:(number|n
 }
 
 export function FleetGrowthView({initialClient='',initialProduct='',tm,onTmChange}:{initialClient?:string;initialProduct?:string;tm:string;onTmChange:(tm:string)=>void}){
+ const {unit}=useVolumeDisplay(), metrics=metricNames(unit);
  const [data,setData]=useState<GrowthResult|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[version,setVersion]=useState(0);
  const [product,setProduct]=useState(initialProduct),[cadence,setCadence]=useState<Cadence>('month'),[metric,setMetric]=useState<GrowthMetric>('volume');
  const [applied,setApplied]=useState<Dates>(blankDates),[draft,setDraft]=useState<Dates>(blankDates),[clientKey,setClientKey]=useState(initialClient),[search,setSearch]=useState(''),[cluster,setCluster]=useState('all'),[order,setOrder]=useState('change');
  useEffect(()=>{
   let cancelled=false;setLoading(true);setError('');
-  const query=new URLSearchParams({view:'growth',product,cadence,tm,...applied});
+  const query=new URLSearchParams({view:'growth',...fleetProductQuery(product),cadence,tm,...applied});
   void api<GrowthResult>('fleet?'+query).then(result=>{if(cancelled)return;setData(result);setDraft({start:result.history.start,end:result.history.end,baseStart:result.comparison.baseline.start,baseEnd:result.comparison.baseline.end,currentStart:result.comparison.current.start,currentEnd:result.comparison.current.end});}).catch(e=>{if(!cancelled)setError((e as Error).message)}).finally(()=>{if(!cancelled)setLoading(false)});
   return()=>{cancelled=true};
  },[product,cadence,applied,version,tm]);
- const clients=data?.clients||[],selected=clients.find(c=>c.key===clientKey);
- const totals=useMemo(()=>{const rows=selected?[selected]:clients;return {baseline:totalOf(rows.map(c=>c.baseline)),current:totalOf(rows.map(c=>c.current)),periods:(data?.periods||[]).map((_,i)=>totalOf(rows.map(c=>c.periods[i])))}},[data,selected]);
+ const clients=useMemo(()=>{
+  const convert=(t:GrowthTotals)=>({...t,volume:fromGallons(t.volume,unit)});
+  return (data?.clients||[]).map(c=>({...c,baseline:convert(c.baseline),current:convert(c.current),periods:c.periods.map(convert)}));
+ },[data,unit]);
+ const selected=clients.find(c=>c.key===clientKey);
+ const totals=useMemo(()=>{const rows=selected?[selected]:clients;return {baseline:totalOf(rows.map(c=>c.baseline)),current:totalOf(rows.map(c=>c.current)),periods:(data?.periods||[]).map((_,i)=>totalOf(rows.map(c=>c.periods[i])))}},[data,clients,selected]);
  const change=compareGrowth(totals.baseline,totals.current,metric),current=growthValue(totals.current,metric),previous=growthValue(totals.baseline,metric),values=totals.periods.map(p=>growthValue(p,metric));
  const records=clients.map(c=>({...c,change:compareGrowth(c.baseline,c.current,metric)}));
  const counts={all:records.length,up:records.filter(c=>c.change.status==='up').length,down:records.filter(c=>c.change.status==='down').length,flat:records.filter(c=>c.change.status==='flat').length,unmatched:records.filter(c=>!['up','down','flat'].includes(c.change.status)).length};
@@ -92,7 +101,7 @@ export function FleetGrowthView({initialClient='',initialProduct='',tm,onTmChang
   <section className="panel growth-controls" aria-label="Filtros de crecimiento de flota">
    <div className="growth-filters">
     <label className="growth-tm-select">TM<select aria-label="TM de crecimiento de flota" value={tm} onChange={e=>{onTmChange(e.target.value);setClientKey('');setCluster('all');setSearch('')}}><option value="">Todos los TMs</option>{data?.tms.map(t=><option key={t.value} value={t.value}>{t.label} ({t.clients})</option>)}</select></label>
-    <label>Combustible<select value={product} onChange={e=>{setProduct(e.target.value);setCluster('all')}}><option value="">Todos los combustibles</option>{data?.products.map(p=><option key={p||"missing"} value={p||"__missing__"}>{productLabel(p)}</option>)}</select></label>
+    <label>Combustible<select value={product} onChange={e=>{setProduct(e.target.value);setCluster('all')}}><option value="">Todos los combustibles</option>{fleetProductOptions(data?.products||[]).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
     <label>Indicador<select value={metric} onChange={e=>{setMetric(e.target.value as GrowthMetric);setCluster('all')}}>{Object.entries(metrics).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
     <label>Agrupar por<select value={cadence} onChange={e=>{setCadence(e.target.value as Cadence);setApplied({...blankDates});setCluster('all')}}>{Object.entries(cadences).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
     <label className="growth-client-select">Cliente de flota<select value={selected?.key||''} onChange={e=>{setClientKey(e.target.value);setCluster('all');setSearch('')}}><option value="">Todos los clientes de flota</option>{clients.map(c=><option key={c.key} value={c.key}>{c.name} · {c.codes.join(', ')}</option>)}</select></label>
@@ -126,7 +135,7 @@ export function FleetGrowthView({initialClient='',initialProduct='',tm,onTmChang
      </section>
     </>
     {!!data.warnings.length&&<div className="growth-warning"><strong>Para interpretar la comparación</strong><ul>{data.warnings.map(w=><li key={w}>{w}</li>)}</ul></div>}
-    <details className="panel growth-method"><summary>Cómo se calcula el crecimiento de flota</summary><p>Consumo neto = galones de compras aprobadas − galones de devoluciones aprobadas. Ventas = Amount de compras aprobadas − Amount de devoluciones aprobadas, en USD y según su fecha de registro. Las preautorizaciones, operaciones pendientes, canceladas y rechazadas quedan fuera.</p><p>Porcentaje = (valor actual − valor base) / valor base × 100. Solo se calcula con base positiva y registros en ambos períodos. Con base cero o negativa se muestra la diferencia absoluta. Los períodos sin registros no se convierten automáticamente en consumo cero.</p><p>La gráfica agrupa por semana, mes o trimestre. “Cambio % por período” compara períodos consecutivos completos dentro del rango cargado. La comparación A → B usa las fechas que seleccionés; al iniciar propone la misma cantidad de días de los dos últimos períodos disponibles.</p><p>Las cuentas se consolidan con la misma ficha de cliente que usa Panel de flota. Cada transacción toma su última versión de una carga completada. Todas las cifras provienen del histórico Payment24; los importes representan consumo cobrado y no acreditan ventas sin impuestos ni margen.</p><p>Hay {data.comparison.baselineRecordDays} fechas con compras/devoluciones en la base y {data.comparison.currentRecordDays} en el actual para los filtros seleccionados. Los cortes parciales se indican sin proyectar el resto del período.</p></details>
+    <details className="panel growth-method"><summary>Cómo se calcula el crecimiento de flota</summary><p>El consumo neto en {unit} descuenta las devoluciones de las compras aprobadas. Ventas = Amount de compras aprobadas − Amount de devoluciones aprobadas, en USD y según su fecha de registro. Las preautorizaciones, operaciones pendientes, canceladas y rechazadas quedan fuera.</p><p>Porcentaje = (valor actual − valor base) / valor base × 100. Solo se calcula con base positiva y registros en ambos períodos. Con base cero o negativa se muestra la diferencia absoluta. Los períodos sin registros no se convierten automáticamente en consumo cero.</p><p>La gráfica agrupa por semana, mes o trimestre. “Cambio % por período” compara períodos consecutivos completos dentro del rango cargado. La comparación A → B usa las fechas que seleccionés; al iniciar propone la misma cantidad de días de los dos últimos períodos disponibles.</p><p>Las cuentas se consolidan con la misma ficha de cliente que usa Panel de flota. Cada transacción toma su última versión de una carga completada. Todas las cifras provienen del histórico Payment24; los importes representan consumo cobrado y no acreditan ventas sin impuestos ni margen.</p><p>Hay {data.comparison.baselineRecordDays} fechas con compras/devoluciones en la base y {data.comparison.currentRecordDays} en el actual para los filtros seleccionados. Los cortes parciales se indican sin proyectar el resto del período.</p></details>
     <p className="footnote">Fuente: Payment24 · {data.source} · Datos de flota disponibles: {date(data.bounds.first)} — {date(data.bounds.last)}. Cargar Payment24 actualiza también esta evolución.</p>
    </>}
   </>}

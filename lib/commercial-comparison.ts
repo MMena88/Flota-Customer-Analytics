@@ -1,5 +1,6 @@
 import {commercialIdentity, matchCustomers, type CommercialRow} from './commercial';
-import {familyIds, fuelFamilies, fuelFamilyOf, isFuelFamily, type FuelFamily} from './commercial-products';
+import {familyIds, fuelFamilies, groupProducts, isFuelFamily, type FuelFamily} from './commercial-products';
+import {fromGallons, type DisplayUnit} from './volume-units';
 import {validDate} from './domain';
 import {calendarPeriod, rangeDays, shiftDay, type DateRange} from './fleet-growth-domain';
 
@@ -16,6 +17,7 @@ export type ComparisonQuery = {
   segment?: string;
   product?: string;
   family?: string;
+  customerView?: string;
 };
 export class ComparisonInputError extends Error {}
 
@@ -103,12 +105,12 @@ type ClientPair = Pair & {id: string; name: string; codes: Set<string>; identifi
 
 export function compareCommercialVolume(rows: CommercialRow[], paymentNames: string[], confirmedNames: string[], q: ComparisonQuery = {}) {
   const family = q.family;
-  if (family !== undefined && (!isFuelFamily(family) || q.product !== undefined)) {
-    throw new ComparisonInputError('Elegí un grupo de combustible válido o un producto individual.');
-  }
   const catalog = [...new Set(rows.map(row => row.product))].sort();
-  const mapped = new Map(catalog.map(product => [product, fuelFamilyOf(product)]));
-  if (q.product !== undefined && !mapped.has(q.product)) throw new ComparisonInputError('El producto seleccionado ya no está en Commercial.');
+  const groups = groupProducts(catalog);
+  if (family !== undefined && ((!isFuelFamily(family) && !groups.members.has(family)) || q.product !== undefined)) {
+    throw new ComparisonInputError('Elegí un grupo válido o un producto individual.');
+  }
+  if (q.product !== undefined && !catalog.includes(q.product)) throw new ComparisonInputError('El producto seleccionado ya no está en Commercial.');
   const reportDays = new Set(rows.map(row => row.date));
   const dates = [...reportDays].sort();
   const bounds = {first: dates[0] || '', last: dates.at(-1) || ''};
@@ -125,16 +127,16 @@ export function compareCommercialVolume(rows: CommercialRow[], paymentNames: str
   for (const row of rows) {
     // Retain the full source segment list, including channels reclassified to Payment24.
     if (!segments.has(row.segment)) segments.set(row.segment, emptyPair());
-    const identity = commercialIdentity(row, matches, confirmed);
+    const identity = commercialIdentity(row, matches, confirmed, q.customerView === 'name' || q.customerView === 'account' ? q.customerView : undefined);
     let segment = segments.get(identity.segment);
     if (!segment) { segment = emptyPair(); segments.set(identity.segment, segment); }
     const selected = q.segment === identity.segment;
     const inScope = !q.segment || selected;
     if (inScope) products.add(row.product);
-    const rowFamily = mapped.get(row.product);
+    const rowFamily = groups.byProduct.get(row.product);
     if ((family && rowFamily !== family) || (q.product !== undefined && row.product !== q.product)) continue;
     let group: Pair | undefined;
-    if (rowFamily && inScope && q.product === undefined) {
+    if (rowFamily && isFuelFamily(rowFamily) && inScope && q.product === undefined) {
       group = fuelTotals.get(rowFamily);
       if (!group) {group = emptyPair(); fuelTotals.set(rowFamily, group);}
     }
@@ -147,10 +149,10 @@ export function compareCommercialVolume(rows: CommercialRow[], paymentNames: str
 
     let client = clients.get(identity.customerId);
     if (!client) {
-      client = {id: identity.customerId, name: identity.identified ? row.name : 'Sin cliente informado', identified: identity.identified, codes: new Set(), ...emptyPair()};
+      client = {id: identity.customerId, name: identity.identified ? identity.name : 'Sin cliente informado', identified: identity.identified, codes: new Set(), ...emptyPair()};
       clients.set(client.id, client);
     }
-    if (row.code && row.code !== 'NONE') client.codes.add(row.code);
+    if (identity.code) client.codes.add(identity.code);
     add(client, side, row.volume);
   }
   if (rows.length && q.segment && !segments.has(q.segment)) throw new ComparisonInputError('El segmento seleccionado ya no está en Commercial.');
@@ -175,3 +177,11 @@ export function compareCommercialVolume(rows: CommercialRow[], paymentNames: str
 
 export type CommercialComparison = ReturnType<typeof compareCommercialVolume>;
 export type ComparisonClient = CommercialComparison['clients'][number];
+
+export function comparisonInUnit(data: CommercialComparison, unit: DisplayUnit) {
+ const convert = <T extends {base:number;current:number;delta:number|null}>(row:T):T => ({
+  ...row, base:fromGallons(row.base,unit), current:fromGallons(row.current,unit),
+  delta:row.delta===null?null:fromGallons(row.delta,unit),
+ });
+ return {...data,unit,segments:data.segments.map(convert),clients:data.clients.map(convert),fuelSummary:data.fuelSummary.map(convert)};
+}
